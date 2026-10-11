@@ -116,6 +116,14 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
     w.document.querySelector('[aria-label="Download TOFEN 2026-06 .eml ZIP"]').click();
     assert.equal(downloads.length, 4);
     assert.match(w.document.querySelector(".batch-list").textContent, /0 opened/);
+    button("Settings").click();
+    await waitFor(() => button("Connect to cloud"));
+    button("Connect to cloud").click();
+    await waitFor(() => w.document.querySelector('[aria-label="Username"]'));
+    assert.ok(w.document.querySelector('[autocomplete="username"]'));
+    assert.equal(w.document.querySelector('[aria-label="Password"]').minLength, 4);
+    assert.ok(!w.document.querySelector('.modal input[type="email"]'));
+    assert.ok(!w.document.querySelector('.modal').textContent.includes("Create account"));
     assert.deepEqual(errors, []);
   } finally {
     w.close();

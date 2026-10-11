@@ -10,13 +10,15 @@ Use Node.js 24. Run `npm ci`, `npm run build`, then `npm test`. Start a local de
 
 ## Database setup
 
-For a new installation, replace the example owner address in `supabase/schema.sql`, then apply it once as a migration. The `rxm_` tables are isolated from other applications. Keep email confirmation enabled and allow only verified members. Register and verify the owner account before signing in. Team access is managed from Settings.
+For a new installation, replace the example owner address in `supabase/schema.sql`, then apply it once as a migration. The `rxm_` tables are isolated from other applications. Apply `supabase/username-auth.sql` after the initial schema. Deploy the `rxm-auth` Edge Function with its included files. The function implements custom authentication: login accepts a username and password, while all management requests verify a Supabase JWT and an active database admin role. Set gateway `verify_jwt = false` to allow the public login action; management actions remain authenticated inside the function. Supabase supplies its server keys automatically to hosted Edge Functions; never put those keys in Vercel or browser code.
+
+Initialize the first admin through the function’s `bootstrap` action using a randomly generated 64-character token. Insert only its SHA-256 digest into `rxm_auth_bootstrap` with a short expiry. The function consumes it once, preserves an existing verified owner identity when present, and refuses initialization once an active admin exists. Keep the token and chosen password out of Git. The admin then creates usernames and passwords on the **Users** page. Accounts are confirmed internally; no confirmation or invitation email is sent. Roles are Admin, Editor and Member. Disabled users immediately lose database access even with an existing token.
 
 Optional first-login signature presets use `rxm_user_templates`. A verified member can read only their own preset. Saved personal settings take precedence. Configure real contacts privately after deployment.
 
 ## Vercel deployment
 
-Import this GitHub repository, choose Vite, use `npm ci` and `npm run build`, and set the output directory to `dist`. Configure `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. Never use a Supabase service-role key in this app. Configure the deployed URL in Supabase Auth. Git integration builds subsequent pushes.
+Import this GitHub repository, choose Vite, use `npm ci` and `npm run build`, and set the output directory to `dist`. Configure `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. Use only a publishable key in the frontend. Update the function’s explicit CORS origin list for your deployment URL. Git integration builds subsequent pushes.
 
 ## App use
 

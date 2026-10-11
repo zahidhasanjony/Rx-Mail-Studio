@@ -70,6 +70,9 @@ import {
   cloudSave,
 } from "./storage";
 import type { Mode } from "./storage";
+import { usernameSignIn, currentAccount } from "./auth";
+import type { UserAccount } from "./auth";
+import UsersPage from "./UsersPage";
 import { download, outlookPackage, mailEml, emlFilename, emlPackage, emlPackageFilename } from "./export";
 import { hierarchyColumns, mapHierarchy } from "./excel";
 import type { Sheet } from "./excel";
@@ -82,7 +85,7 @@ import {
 } from "./bridge";
 
 type Page =
-  "generate" | "sources" | "hierarchy" | "brands" | "history" | "settings";
+  "generate" | "sources" | "hierarchy" | "brands" | "history" | "settings" | "users";
 const nav = [
   { id: "generate", label: "Generate emails", icon: LayoutDashboard },
   { id: "sources", label: "Source files", icon: UploadCloud },
@@ -90,6 +93,7 @@ const nav = [
   { id: "brands", label: "Brand library", icon: FlaskConical },
   { id: "history", label: "Batch history", icon: History },
   { id: "settings", label: "Settings", icon: SettingsIcon },
+  { id: "users", label: "Users", icon: Users },
 ] as const;
 const formatDate = (s: string) =>
   new Date(s + "T00:00:00Z").toLocaleDateString("en-GB", {
@@ -452,9 +456,9 @@ export default function App() {
     [batchModal, setBatchModal] = useState<Batch | null>(null),
     [login, setLogin] = useState(false),
     [userEmail, setUserEmail] = useState(""),
-    [email, setEmail] = useState(""),
+    [username, setUsername] = useState(""),
     [password, setPassword] = useState(""),
-    [authMethod, setAuthMethod] = useState<"login" | "register">("login");
+    [account, setAccount] = useState<UserAccount | null>(null);
   const [sourcePicker, setSourcePicker] = useState<{
       file: File;
       sheets: Sheet[];
@@ -478,9 +482,7 @@ export default function App() {
       index: number;
     } | null>(null),
     [brandEdit, setBrandEdit] = useState<BrandProfile | null>(null),
-    [settingsDraft, setSettingsDraft] = useState<Settings>(workspace.settings),
-    [newMember, setNewMember] = useState(""),
-    [members, setMembers] = useState<{ email: string; role: string }[]>([]);
+    [settingsDraft, setSettingsDraft] = useState<Settings>(workspace.settings);
   const sourceInput = useRef<HTMLInputElement>(null),
     hierarchyInput = useRef<HTMLInputElement>(null),
     resultInput = useRef<HTMLInputElement>(null),
@@ -528,6 +530,16 @@ export default function App() {
     );
     return () => subscription.unsubscribe();
   }, []);
+  useEffect(() => {
+    if (!userEmail) { setAccount(null); return; }
+    let alive = true;
+    currentAccount().then((value) => { if (alive) setAccount(value); })
+      .catch(() => { if (alive) setAccount(null); });
+    return () => { alive = false; };
+  }, [userEmail]);
+  useEffect(() => {
+    if (page === "users" && (mode !== "cloud" || account?.role !== "owner")) setPage("settings");
+  }, [page, mode, account?.role]);
   const profile =
     workspace.profiles.find((p) => p.id === profileId) || workspace.profiles[0];
   useEffect(() => {
@@ -1037,18 +1049,9 @@ export default function App() {
     setBusy(true);
     setBusyText("Connecting to Supabase");
     try {
-      if (authMethod === "register") {
-        const r = await supabase.auth.signUp({
-          email,
-          password,
-          options: { emailRedirectTo: location.origin },
-        });
-        if (r.error) throw r.error;
-        notify("Check your email to confirm your account, then sign in.");
-        return;
-      }
-      const r = await supabase.auth.signInWithPassword({ email, password });
-      if (r.error) throw r.error;
+      const signedIn = await usernameSignIn(username, password);
+      setAccount(signedIn);
+      setPassword("");
       const w = await cloudLoad();
       setWorkspace(w);
       setMode("cloud");
@@ -1072,6 +1075,7 @@ export default function App() {
     }
     setLoading(true);
     try {
+      setAccount(await currentAccount());
       setWorkspace(await cloudLoad());
       setMode("cloud");
       notify("Cloud workspace opened");
@@ -1119,15 +1123,6 @@ export default function App() {
       if (resultInput.current) resultInput.current.value = "";
     }
   }
-  async function loadMembers() {
-    if (!supabase || mode !== "cloud") return;
-    const r = await supabase.from("rxm_members").select("email,role");
-    if (r.error) notify(r.error.message, true);
-    else setMembers(r.data || []);
-  }
-  useEffect(() => {
-    if (page === "settings" && mode === "cloud") void loadMembers();
-  }, [page, mode]);
   const periodText =
     {
       all: "All available dates",
@@ -1164,7 +1159,7 @@ export default function App() {
         </a>
         <span className="workspace-label">SBM WORKSPACE</span>
         <nav>
-          {nav.map((n) => (
+          {nav.filter((n) => n.id !== "users" || (mode === "cloud" && account?.role === "owner")).map((n) => (
             <button
               key={n.id}
               className={page === n.id ? "active" : ""}
@@ -1190,7 +1185,7 @@ export default function App() {
             </div>
           </div>
           <button className="user" onClick={() => setPage("settings")}>
-            <span className="avatar">ZH</span>
+            <span className="avatar">{account?.username.slice(0, 2) || "SB"}</span>
             <span>
               <strong>
                 {workspace.settings.name || "Set up your profile"}
@@ -1230,7 +1225,7 @@ export default function App() {
               </span>
               <span className="status-dot" />
             </button>
-            <span className="avatar small">ZH</span>
+            <span className="avatar small">{account?.username.slice(0, 2) || "SB"}</span>
           </div>
         </header>
         <main>
@@ -1275,6 +1270,7 @@ export default function App() {
                     brands: "Brand library",
                     history: "Batch history",
                     settings: "Workspace settings",
+                    users: "User management",
                   }[page]
                 }
               </h1>
@@ -1293,6 +1289,7 @@ export default function App() {
                       "Every prepared email keeps its data and recipients as they were.",
                     settings:
                       "Personal recipients, email content and your SBM team.",
+                    users: "Create team accounts and control access to your workspace.",
                   }[page]
                 }
               </p>
@@ -2411,10 +2408,10 @@ export default function App() {
                   <h3>SBM cloud workspace</h3>
                   <p>
                     {mode === "cloud"
-                      ? `Signed in as ${userEmail}`
+                      ? `Signed in as ${account?.username || "your account"}`
                       : cloudConfigured
-                        ? "Connect to share sources and hierarchy with your invited SBM team."
-                        : "The campaign Supabase project is waiting for restoration and deployment configuration."}
+                        ? "Sign in with your username to share sources and hierarchy with your SBM team."
+                        : "Cloud connection is not configured yet."}
                   </p>
                   <Button variant="secondary" onClick={openCloud}>
                     {mode === "cloud" ? (
@@ -2512,94 +2509,11 @@ export default function App() {
                     Open device workspace
                   </Button>
                 </section>
-                {mode === "cloud" && (
+                {mode === "cloud" && account?.role === "owner" && (
                   <section className="card small-card team-card">
-                    <h3>SBM team access</h3>
-                    <p>
-                      Add an email to allow that person to register and sign in.
-                      Editors can import files; members can generate emails.
-                    </p>
-                    {members.map((m) => (
-                      <div className="member-row" key={m.email}>
-                        <span>
-                          {m.email}
-                          <small>{m.role}</small>
-                        </span>
-                        {m.role !== "owner" && (
-                          <button
-                            className="icon-button"
-                            aria-label={`Remove ${m.email}`}
-                            onClick={async () => {
-                              const r = await supabase!
-                                .from("rxm_members")
-                                .delete()
-                                .eq("email", m.email);
-                              if (r.error) notify(r.error.message, true);
-                              else {
-                                notify("Member access removed");
-                                void loadMembers();
-                              }
-                            }}
-                          >
-                            <X size={15} />
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    <input
-                      placeholder="team.member@example.com"
-                      type="email"
-                      value={newMember}
-                      onChange={(e) => setNewMember(e.target.value)}
-                    />
-                    <div className="empty-actions">
-                      <Button
-                        variant="secondary"
-                        onClick={async () => {
-                          if (!emailValid(newMember)) {
-                            notify("Enter a valid email address.", true);
-                            return;
-                          }
-                          const r = await supabase!.from("rxm_members").insert({
-                            email: newMember.toLowerCase().trim(),
-                            role: "member",
-                          });
-                          if (r.error) notify(r.error.message, true);
-                          else {
-                            setNewMember("");
-                            void loadMembers();
-                            notify("Team member allowed to sign in");
-                          }
-                        }}
-                      >
-                        <Plus size={14} />
-                        Add member
-                      </Button>
-                      <Button
-                        variant="text"
-                        onClick={async () => {
-                          if (!emailValid(newMember)) {
-                            notify("Enter a valid email address.", true);
-                            return;
-                          }
-                          const r = await supabase!.from("rxm_members").insert({
-                            email: newMember.toLowerCase().trim(),
-                            role: "editor",
-                          });
-                          if (r.error) notify(r.error.message, true);
-                          else {
-                            setNewMember("");
-                            void loadMembers();
-                            notify("Editor allowed to sign in");
-                          }
-                        }}
-                      >
-                        Add editor
-                      </Button>
-                    </div>
-                    <small className="tiny">
-                      Only the workspace owner can change membership.
-                    </small>
+                    <h3>Team accounts</h3>
+                    <p>Create usernames and passwords, choose access roles, and reset passwords from the Users page.</p>
+                    <Button variant="secondary" onClick={() => setPage("users")}><Users size={16} />Manage users</Button>
                   </section>
                 )}
                 <section className="card small-card">
@@ -2616,6 +2530,7 @@ export default function App() {
               </div>
             </div>
           )}
+          {page === "users" && mode === "cloud" && account?.role === "owner" && <UsersPage admin={account} notify={notify} onAccountChange={setAccount} />}
           <footer className="page-footer">
             <span>Rx Mail Studio</span>
             <span>Built for your SBM workflow</span>
@@ -3448,7 +3363,7 @@ export default function App() {
       {login && (
         <Modal
           title="Connect your SBM workspace"
-          onClose={() => setLogin(false)}
+          onClose={() => { setLogin(false); setPassword(""); }}
         >
           <form
             onSubmit={(e) => {
@@ -3461,63 +3376,32 @@ export default function App() {
                 <ShieldCheck size={18} />
                 <span>
                   {cloudConfigured
-                    ? "Only verified accounts added by the workspace owner can access shared data."
+                    ? "Sign in with the username and password created by your admin. No email confirmation is needed."
                     : "Cloud connection is not configured yet. Device imports, calculations and email preparation remain available."}
                 </span>
               </div>
-              <div className="segmented">
-                <button
-                  type="button"
-                  className={authMethod === "login" ? "active" : ""}
-                  onClick={() => setAuthMethod("login")}
-                >
-                  Sign in
-                </button>
-                <button
-                  type="button"
-                  className={authMethod === "register" ? "active" : ""}
-                  onClick={() => setAuthMethod("register")}
-                >
-                  Create account
-                </button>
-              </div>
-              <Field label="Work email">
-                <input
-                  autoComplete="email"
-                  type="email"
-                  value={email}
-                  required
-                  onChange={(e) => setEmail(e.target.value)}
-                />
+              <Field label="Username">
+                <input autoComplete="username" aria-label="Username" value={username} required minLength={2} maxLength={32} onChange={(e) => setUsername(e.target.value)} />
               </Field>
               <Field label="Password">
                 <input
-                  autoComplete={
-                    authMethod === "register"
-                      ? "new-password"
-                      : "current-password"
-                  }
+                  autoComplete="current-password"
+                  aria-label="Password"
                   type="password"
-                  minLength={8}
+                  minLength={4}
+                  maxLength={128}
                   value={password}
                   required
                   onChange={(e) => setPassword(e.target.value)}
                 />
               </Field>
-              {authMethod === "register" && (
-                <p className="tiny">
-                  Register with the email allowed in the team list. Confirm your
-                  email before signing in. Use an email added by your workspace
-                  owner.
-                </p>
-              )}
             </div>
             <div className="modal-footer">
-              <Button variant="secondary" onClick={() => setLogin(false)}>
+              <Button variant="secondary" onClick={() => { setLogin(false); setPassword(""); }}>
                 Cancel
               </Button>
               <Button type="submit" disabled={busy || !cloudConfigured}>
-                {authMethod === "register" ? "Create account" : "Sign in"}
+                Sign in
                 <ArrowRight size={16} />
               </Button>
             </div>

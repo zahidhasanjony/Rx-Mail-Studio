@@ -190,7 +190,7 @@ export function settingsForNewUser(email: string): Settings {
     ...structuredClone(defaultSettings),
     name: "",
     title: "",
-    email,
+    email: email.endsWith("@users.rxmail.invalid") ? "" : email,
     personalCc: [],
   };
 }

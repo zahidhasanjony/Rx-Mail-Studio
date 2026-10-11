@@ -63,7 +63,7 @@ export async function cloudLoad(): Promise<Workspace> {
   fail(membership.error);
   if (!membership.data)
     throw new Error(
-      "Your email has not been added to this SBM workspace. Ask the workspace owner to add it.",
+      "Your account is not active in this SBM workspace. Ask your admin to check your access.",
     );
   const values = await Promise.all([
     supabase
