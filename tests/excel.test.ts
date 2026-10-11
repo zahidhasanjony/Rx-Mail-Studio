@@ -1,0 +1,107 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { zipSync, strToU8 } from "fflate";
+import {
+  inspectWorkbook,
+  importRx,
+  mapHierarchy,
+  hierarchyColumns,
+} from "../src/excel";
+const xml = (s: string) => strToU8(s),
+  escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+function workbook() {
+  const headers = [
+    "Prescription Date",
+    "Generic Name",
+    "Brand Name",
+    "Company Name",
+    "Dosage Description",
+    "Dr Code",
+    "Dr Name/Institute Name",
+    "Doc Specialty",
+    "ACD RSE",
+    "ACD MPE",
+    "CCD. RSE Code",
+    "CCD. MPE Code",
+  ];
+  const strings = [
+    ...headers,
+    "Ketotifen",
+    "TOFEN",
+    "BEXIMCO",
+    "SYP",
+    "DOC001",
+    "Dr Test & Team",
+    "Medicine",
+    "D5",
+    "D501",
+    "D6",
+    "D601",
+  ];
+  const cell = (col: number, value: string, shared = true) =>
+    `<c r="${String.fromCharCode(65 + col)}2"${shared ? ' t="s"' : ""}><v>${value}</v></c>`;
+  const values = [
+    "46188",
+    ...Array.from({ length: 11 }, (_, i) => String(12 + i)),
+  ];
+  return new File(
+    [
+      zipSync({
+        "xl/workbook.xml": xml(
+          '<workbook xmlns:r="urn:r"><sheets><sheet name="TRD TEST" r:id="rId1"/></sheets></workbook>',
+        ),
+        "xl/_rels/workbook.xml.rels": xml(
+          '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
+        ),
+        "xl/sharedStrings.xml": xml(
+          `<sst>${strings.map((s) => `<si><t>${escape(s)}</t></si>`).join("")}</sst>`,
+        ),
+        "xl/worksheets/sheet1.xml": xml(
+          `<worksheet><sheetData><row r="1">${headers.map((_, i) => `<c r="${String.fromCharCode(65 + i)}1" t="s"><v>${i}</v></c>`).join("")}</row><row r="2">${values.map((s, i) => cell(i, s, i > 0)).join("")}<c r="M2"/></row><row r="3">${values.map((s, i) => cell(i, s, i > 0).replace('2"', '3"')).join("")}</row></sheetData></worksheet>`,
+        ),
+      }) as unknown as BlobPart,
+    ],
+    "test.xlsx",
+  );
+}
+test("streaming Excel import handles shared strings, XML entities and self-closing cells", async () => {
+  const file = workbook(),
+    sheets = await inspectWorkbook(file);
+  assert.equal(sheets[0].name, "TRD TEST");
+  const d = await importRx(file, sheets);
+  assert.equal(d.rows, 2);
+  assert.equal(d.invalidRows, 0);
+  assert.equal(d.facts.length, 1);
+  assert.equal(d.facts[0].count, 2);
+  assert.equal(d.facts[0].doctorName, "Dr Test & Team");
+  assert.equal(d.facts[0].acdRegion, "D5");
+  assert.deepEqual(d.facts[0].sourceRows, [2, 3]);
+  assert.equal(d.catalog[0].brand, "TOFEN");
+});
+test("quarterly hierarchy mapping is explicit and validates territory structure", () => {
+  const mapping = Object.fromEntries(hierarchyColumns.map((c, i) => [c, i]));
+  const rows = [
+    hierarchyColumns,
+    [
+      "ACD",
+      "D5",
+      "Sample",
+      "rse@example.com",
+      "Sample Bhai",
+      "MDR",
+      "manager@example.com",
+      "",
+      "",
+      "",
+      "",
+      "Yes",
+    ],
+  ];
+  const r = mapHierarchy(rows, mapping);
+  assert.equal(r[0].cc[0].email, "manager@example.com");
+  assert.equal(r[0].salutation, "Sample Bhai");
+  assert.throws(
+    () => mapHierarchy([hierarchyColumns, ["Wrong", "D5"]], mapping),
+    /Invalid structure/,
+  );
+});

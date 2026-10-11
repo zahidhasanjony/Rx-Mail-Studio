@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env*
+!.env.example
+.vercel/
+*.xlsx
+*.xls
+*.msg
+*.rxmail.json
+*.zip
+
+*.tsbuildinfo
