@@ -4,6 +4,9 @@ export interface UserAccount {
   id: string; username: string; name: string; role: UserRole;
   active: boolean; createdAt: string;
 }
+export class AccountServiceError extends Error {
+  constructor(public status: number, message: string) { super(message); }
+}
 export async function accountRequest<T>(body: Record<string, unknown>, authenticated = true): Promise<T> {
   if (!supabase) throw new Error("Cloud connection is not configured.");
   const headers: Record<string, string> = {
@@ -20,7 +23,7 @@ export async function accountRequest<T>(body: Record<string, unknown>, authentic
     method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(30000),
   });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.error || "Account service is unavailable. Please try again.");
+  if (!response.ok) throw new AccountServiceError(response.status, result.error || "Account service is unavailable. Please try again.");
   return result;
 }
 export async function usernameSignIn(username: string, password: string) {

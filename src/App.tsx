@@ -70,7 +70,7 @@ import {
   cloudSave,
 } from "./storage";
 import type { Mode } from "./storage";
-import { usernameSignIn, currentAccount } from "./auth";
+import { usernameSignIn, currentAccount, AccountServiceError } from "./auth";
 import type { UserAccount } from "./auth";
 import UsersPage from "./UsersPage";
 import { download, outlookPackage, mailEml, emlFilename, emlPackage, emlPackageFilename } from "./export";
@@ -1080,6 +1080,12 @@ export default function App() {
       setMode("cloud");
       notify("Cloud workspace opened");
     } catch (e) {
+      if (e instanceof AccountServiceError && [401, 403].includes(e.status)) {
+        await supabase?.auth.signOut({ scope: "local" });
+        setAccount(null);
+        setPassword("");
+        setLogin(true);
+      }
       notify((e as Error).message, true);
     } finally {
       setLoading(false);

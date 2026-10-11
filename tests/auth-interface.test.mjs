@@ -18,23 +18,26 @@ test("compiled username login opens admin user creation; members cannot see user
     const html = await readFile(join(output, "index.html"), "utf8");
     const script = html.match(/src="(\/assets\/index-[^"]+\.js)"/)[1];
     const code = await readFile(join(output, script), "utf8");
-    for (const role of ["owner", "member"]) {
+    for (const role of ["owner", "member", "stale"]) {
       const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "https://rxmail.vercel.app/", runScripts: "outside-only", pretendToBeVisual: true });
       const w = dom.window, calls = [], errors = [];
-      const account = { id: "11111111-1111-4111-8111-111111111111", username: "ADMIN", name: "Test admin", role, active: true, createdAt: "2026-01-01" };
+      const account = { id: "11111111-1111-4111-8111-111111111111", username: "ADMIN", name: "Test admin", role: role === "stale" ? "member" : role, active: true, createdAt: "2026-01-01" };
       const jwt = [Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url"), Buffer.from(JSON.stringify({ sub: account.id, email: "owner@example.com", exp: Math.floor(Date.now()/1000)+3600, role: "authenticated" })).toString("base64url"), Buffer.alloc(32, 1).toString("base64url")].join(".");
       const accounts = [account];
+      if (role === "stale") w.localStorage.setItem("sb-rx-project-auth-token", JSON.stringify({ access_token: jwt, refresh_token: "old-refresh", token_type: "bearer", expires_at: Math.floor(Date.now()/1000)+3600, expires_in: 3600, user: { id: account.id, email: "owner@example.com" } }));
       Object.defineProperty(w, "crypto", { value: webcrypto }); Object.defineProperty(w, "indexedDB", { value: indexedDB }); Object.defineProperty(w, "IDBKeyRange", { value: IDBKeyRange });
       Object.assign(w, { structuredClone, TextEncoder, TextDecoder, Blob, Headers, Request, Response, AbortSignal });
       w.addEventListener("error", (e) => errors.push(e.message));
       w.fetch = async (input, options) => {
         const url = new URL(typeof input === "string" ? input : input.url), body = options?.body ? JSON.parse(options.body) : {};
         const response = (data) => new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
+        if (url.pathname === "/auth/v1/logout") return response({});
         if (url.pathname === "/auth/v1/user") return response({ id: account.id, email: "owner@example.com", email_confirmed_at: "2026-01-01", aud: "authenticated", role: "authenticated", app_metadata: {}, user_metadata: {}, created_at: "2026-01-01" });
         if (url.pathname.startsWith("/rest/v1/")) return response(url.pathname.endsWith("/rxm_members") ? [{ email: "owner@example.com", role }] : []);
         if (url.pathname.endsWith("/rxm-auth")) {
           calls.push(body);
           if (body.action === "login") return response({ account, access_token: jwt, refresh_token: "refresh-test-token" });
+          if (body.action === "me" && role === "stale") return new Response(JSON.stringify({ error: "Please sign in again." }), { status: 401, headers: { "Content-Type": "application/json" } });
           if (body.action === "me") return response({ account });
           if (body.action === "list") return response({ accounts });
           if (body.action === "create") { const created = { ...account, id: "22222222-2222-4222-8222-222222222222", username: body.username, name: body.name, role: body.role }; accounts.push(created); return response({ account: created }); }
@@ -50,6 +53,11 @@ test("compiled username login opens admin user creation; members cannot see user
         await waitFor(() => button("Settings")); button("Settings").click();
         await waitFor(() => button("Connect to cloud")); button("Connect to cloud").click();
         await waitFor(() => w.document.querySelector('[aria-label="Username"]'));
+        if (role === "stale") {
+          assert.ok(calls.some((c) => c.action === "me"));
+          assert.equal(w.localStorage.getItem("sb-rx-project-auth-token"), null, "Clear stale sessions so the user can sign in again");
+          assert.deepEqual(errors, []); continue;
+        }
         fill(w.document.querySelector('[aria-label="Username"]'), "ADMIN"); fill(w.document.querySelector('[aria-label="Password"]'), "abcd");
         w.document.querySelector('.modal form').dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
         await waitFor(() => button("Cloud connected"));
