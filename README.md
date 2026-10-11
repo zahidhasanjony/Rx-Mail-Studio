@@ -24,9 +24,13 @@ Upload source spreadsheets and a recipient hierarchy through the interface. Revi
 
 The own-brand summary appears before the prescriber table, followed by up to four leading competitors. Counts use the selected market denominator. Doctor codes identify records. Missing routing or reporting coverage blocks the affected email.
 
-## Outlook
+## Email export and Outlook
 
-On Windows, the optional paired companion or batch launcher displays editable messages in Classic Outlook. Neither explicitly saves nor sends email. Outlook can autosave according to its own settings. The companion listens only on loopback and checks its paired origin and token. New Outlook and mobile Outlook do not support this COM integration.
+Generating a batch downloads one ZIP containing a separate `.eml` file for every selected regional email. To, CC, sender, subject, regional Rx share summary, prescriber table and signature are preserved. Batch history can download the complete ZIP again, and previews or batch rows can download individual `.eml` files. Downloading keeps opening status unchanged.
+
+Extract the ZIP and open the files in Outlook. UTF-8 MIME messages include a plain-text fallback and `X-Unsent: 1` to request editable opening. Email clients handle this differently; test one file in the intended Outlook version before using the full batch. No companion or PowerShell is needed for the `.eml` export. Review recipients and the sending account before sending manually.
+
+On Windows, the optional paired companion or batch launcher displays editable messages in Classic Outlook. Automatic companion opening is off by default and can be enabled in Settings. Neither explicitly saves nor sends email. Outlook can autosave according to its own settings. The companion listens only on loopback and checks its paired origin and token. New Outlook and mobile Outlook do not support this COM integration.
 
 The installed PWA supports mobile review and settings. Cloud sync requires a connection. Large spreadsheet imports should be tested on the intended device. A real Windows/Classic Outlook acceptance test is required before operational use.
 

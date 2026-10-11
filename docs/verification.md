@@ -1,6 +1,6 @@
 # Verification
 
-Automated checks cover market-share denominators, doctor-code grouping, regional routing, reporting filters, recipient validation, escaped email HTML, CC deduplication, opening results, coverage, streaming XLSX parsing, hierarchy mapping, private settings, verified membership and transactional import replacement. The compiled interface check exercises preview, batch generation and history.
+Automated checks cover market-share denominators, doctor-code grouping, regional routing, reporting filters, recipient validation, escaped email HTML, CC deduplication, opening results, coverage, streaming XLSX parsing, hierarchy mapping, private settings, verified membership and transactional import replacement. Email export checks cover MIME round trips, UTF-8 names and subjects, To/CC, preserved HTML tables, header safety and complete ZIP output. The compiled interface check exercises preview, batch generation, .eml downloads and history.
 
 Run `npm run build` and `npm test` after changes. Database tests use a local PostgreSQL-compatible engine and simulated authentication identities. Production configuration also needs live access checks and the Supabase Security Advisor.
 

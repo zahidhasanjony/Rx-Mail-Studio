@@ -1387,6 +1387,7 @@ hr {
   padding: 17px 24px;
   border-top: 1px solid var(--border);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
@@ -1988,6 +1989,9 @@ hr {
   }
   .batch-row > .button {
     margin-left: 53px;
+  }
+  .batch-row > .button + .button {
+    margin-left: 0;
   }
   .upload-card {
     padding: 30px 18px;

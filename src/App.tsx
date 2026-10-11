@@ -44,6 +44,7 @@ import type {
   Structure,
   Dataset,
   Contact,
+  Mail as RegionalMail,
 } from "./types";
 import { emptyWorkspace, starterProfiles } from "./types";
 import {
@@ -69,7 +70,7 @@ import {
   cloudSave,
 } from "./storage";
 import type { Mode } from "./storage";
-import { download, outlookPackage } from "./export";
+import { download, outlookPackage, mailEml, emlFilename, emlPackage, emlPackageFilename } from "./export";
 import { hierarchyColumns, mapHierarchy } from "./excel";
 import type { Sheet } from "./excel";
 import { demoWorkspace } from "./demo";
@@ -111,6 +112,7 @@ function Button({
   disabled = false,
   type = "button",
   className = "",
+  "aria-label": ariaLabel,
 }: {
   children: ReactNode;
   onClick?: () => void;
@@ -118,6 +120,7 @@ function Button({
   disabled?: boolean;
   type?: "button" | "submit";
   className?: string;
+  "aria-label"?: string;
 }) {
   return (
     <button
@@ -125,6 +128,7 @@ function Button({
       className={`button ${variant} ${className}`}
       onClick={onClick}
       disabled={disabled}
+      aria-label={ariaLabel}
     >
       {children}
     </button>
@@ -419,7 +423,7 @@ export default function App() {
   const initialChoice = useRef(false);
   const [bridgeConnected, setBridgeConnected] = useState(false),
     [bridgeAuto, setBridgeAuto] = useState(
-      localStorage.getItem("rxm-bridge-auto") !== "false",
+      localStorage.getItem("rxm-bridge-auto-v2") === "true",
     );
   const [workspace, setWorkspace] = useState<Workspace>(emptyWorkspace),
     [mode, setMode] = useState<Mode>("local"),
@@ -441,6 +445,9 @@ export default function App() {
   const [preview, setPreview] = useState<{
       html: string;
       title: string;
+      mail?: RegionalMail;
+      sender?: Pick<Settings, "name" | "email">;
+      createdAt?: string;
     } | null>(null),
     [batchModal, setBatchModal] = useState<Batch | null>(null),
     [login, setLogin] = useState(false),
@@ -957,6 +964,7 @@ export default function App() {
         await update({ ...workspace, batches: [batch, ...workspace.batches] })
       ) {
         setBatchModal(batch);
+        downloadEmlBatch(batch);
         if (
           bridgeAuto &&
           mode !== "demo" &&
@@ -964,6 +972,26 @@ export default function App() {
         )
           await openBatch(batch);
       }
+    } catch (e) {
+      notify((e as Error).message, true);
+    }
+  }
+  function downloadEmlBatch(batch: Batch) {
+    try {
+      download(
+        emlPackage(batch) as unknown as BlobPart,
+        emlPackageFilename(batch),
+        "application/zip",
+      );
+      notify(`${batch.mails.length} .eml emails downloaded in one ZIP. Extract it and review in Outlook.`);
+    } catch (e) {
+      notify((e as Error).message + " Your prepared batch is saved in History.", true);
+    }
+  }
+  function downloadEml(mail: RegionalMail, sender: Pick<Settings, "name" | "email">, createdAt?: string) {
+    try {
+      download(mailEml(mail, sender, createdAt), emlFilename(mail), "message/rfc822");
+      notify(".eml email downloaded. Review it in Outlook before sending.");
     } catch (e) {
       notify((e as Error).message, true);
     }
@@ -991,7 +1019,7 @@ export default function App() {
     } catch (e) {
       setBridgeConnected(false);
       notify(
-        (e as Error).message + " Your prepared batch is saved in History.",
+        (e as Error).message + " Your prepared batch is saved in History. Use Download .eml ZIP to open the emails without the companion.",
         true,
       );
     } finally {
@@ -1648,6 +1676,8 @@ export default function App() {
                                     setPreview({
                                       html: m.html,
                                       title: m.subject,
+                                      mail: m,
+                                      sender: { name: workspace.settings.name, email: workspace.settings.email },
                                     });
                                   } catch (e) {
                                     notify((e as Error).message, true);
@@ -1686,7 +1716,7 @@ export default function App() {
                 <div className="queue-footer">
                   <span>
                     <ShieldCheck size={15} />
-                    {selected.size} selected · opened emails, manual sending
+                    {selected.size} selected · .eml ZIP, manual sending
                   </span>
                   <Button
                     disabled={busy || loading || !selected.size}
@@ -1701,13 +1731,13 @@ export default function App() {
               <div className="help-line">
                 <span>
                   <Monitor size={15} />
-                  Classic Outlook on Windows opens your formatted email batch.
+                  Generate one ZIP with a separate .eml email for each region.
                 </span>
                 <button
                   onClick={() =>
                     setPreview({
-                      title: "How Outlook opening works",
-                      html: '<body style="font:16px Arial;padding:30px;line-height:1.7"><h2>Review-ready Outlook emails</h2><p>Generate your batch, download its launcher ZIP, extract it on your Windows PC, and double-click Open-Outlook.cmd. Each message opens in Classic Outlook with the full HTML tables, To and CC.</p><p>The launcher does not save or send messages. Outlook may autosave open messages according to your settings. New Outlook and mobile Outlook do not support this COM launcher.</p><p>After opening, import outlook-results.json in Batch history to record actual results. Downloading the ZIP alone never marks a message Opened.</p></body>',
+                      title: "How .eml export works",
+                      html: '<body style="font:16px Arial;padding:30px;line-height:1.7"><h2>Regional .eml emails</h2><p>Generate your batch to download one ZIP. Extract it and open the .eml files in Outlook. Each file has its own To, CC, subject, Rx share summary, prescriber table and signature.</p><p>Check one file first: email clients differ in how they open unsent .eml messages. If yours opens a read-only message, use its edit/compose option or the optional Classic Outlook launcher.</p><p>Review and send manually. Downloads never mark emails Opened or Sent. Download the ZIP again or a single .eml from Batch history. Outlook may autosave messages after you open them.</p></body>',
                     })
                   }
                 >
@@ -2133,6 +2163,14 @@ export default function App() {
                       </div>
                       <Button
                         variant="secondary"
+                        onClick={() => downloadEmlBatch(b)}
+                        aria-label={`Download ${b.brand} ${b.month} .eml ZIP`}
+                      >
+                        <Download size={15} />
+                        .eml ZIP
+                      </Button>
+                      <Button
+                        variant="secondary"
                         onClick={() => setBatchModal(b)}
                       >
                         View batch
@@ -2302,8 +2340,8 @@ export default function App() {
                   </div>
                   <h3>Classic Outlook companion</h3>
                   <p>
-                    Set up once on your Windows PC, then generate and open the
-                    whole batch in one click.
+                    Optional: open editable messages directly on your Windows PC.
+                    The default .eml export works without this companion.
                   </p>
                   <span
                     className={`badge ${bridgeConnected ? "success" : "neutral"}`}
@@ -2353,17 +2391,17 @@ export default function App() {
                       onChange={(e) => {
                         setBridgeAuto(e.target.checked);
                         localStorage.setItem(
-                          "rxm-bridge-auto",
+                          "rxm-bridge-auto-v2",
                           String(e.target.checked),
                         );
                       }}
                     />
-                    Open automatically after generation
+                    Also open automatically after generation
                   </label>
                   <p className="tiny">
                     Keep the companion running. Messages open for your review;
                     sending stays manual. If local connections are blocked, use
-                    the batch ZIP launcher.
+                    Download .eml ZIP.
                   </p>
                 </section>
                 <section className="card small-card connection-card">
@@ -2572,7 +2610,7 @@ export default function App() {
                   </p>
                   <span className="badge neutral">
                     <Monitor size={13} />
-                    Outlook opening requires Windows
+                    .eml download available on mobile
                   </span>
                 </section>
               </div>
@@ -2663,6 +2701,12 @@ export default function App() {
             srcDoc={preview.html}
           />
           <div className="modal-footer">
+            {preview.mail && preview.sender && (
+              <Button onClick={() => downloadEml(preview.mail!, preview.sender!, preview.createdAt)}>
+                <Download size={16} />
+                Download .eml
+              </Button>
+            )}
             <Button
               variant="secondary"
               onClick={() =>
@@ -3279,9 +3323,9 @@ export default function App() {
             <div className="notice">
               <Monitor size={19} />
               <span>
-                Download the ZIP, extract it on Windows, then run{" "}
-                <strong>Open-Outlook.cmd</strong>. Each email opens in Classic
-                Outlook for your review and manual sending.
+                Download the .eml ZIP, extract it, and open each email in Outlook.
+                Each region has its own To and CC. Review and send manually.
+                No companion or PowerShell is needed for .eml files.
               </span>
             </div>
             <div className="table-scroll max-table">
@@ -3321,10 +3365,17 @@ export default function App() {
                           className="icon-button"
                           aria-label={`Preview ${m.region}`}
                           onClick={() =>
-                            setPreview({ title: m.subject, html: m.html })
+                            setPreview({ title: m.subject, html: m.html, mail: m, sender: batchModal.settings, createdAt: batchModal.createdAt })
                           }
                         >
                           <Eye size={17} />
+                        </button>
+                        <button
+                          className="icon-button"
+                          aria-label={`Download ${m.structure} ${m.region} .eml`}
+                          onClick={() => downloadEml(m, batchModal.settings, batchModal.createdAt)}
+                        >
+                          <Download size={17} />
                         </button>
                       </td>
                     </tr>
@@ -3333,9 +3384,10 @@ export default function App() {
               </table>
             </div>
             <p className="tiny">
-              The launcher does not call Save or Send. Outlook’s own autosave
-              settings still apply. After running it, import
-              outlook-results.json from Batch history.
+              Check one .eml first; editable opening depends on your email client.
+              Downloading leaves opening status unchanged. Outlook may autosave
+              messages after you open them. The Classic Outlook options remain
+              available below.
             </p>
           </div>
           <div className="modal-footer">
@@ -3360,6 +3412,7 @@ export default function App() {
               Open in Outlook
             </Button>
             <Button
+              variant="secondary"
               disabled={mode === "demo"}
               onClick={() => {
                 const pending = {
@@ -3384,6 +3437,10 @@ export default function App() {
             >
               <Download size={17} />
               Download Outlook launcher
+            </Button>
+            <Button onClick={() => downloadEmlBatch(batchModal)}>
+              <Download size={17} />
+              Download .eml ZIP
             </Button>
           </div>
         </Modal>

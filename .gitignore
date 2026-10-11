@@ -6,6 +6,7 @@ dist/
 *.xlsx
 *.xls
 *.msg
+*.eml
 *.rxmail.json
 *.zip
 
