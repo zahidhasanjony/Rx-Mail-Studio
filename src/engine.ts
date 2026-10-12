@@ -325,6 +325,7 @@ export function regionalQueue(
         }),
     );
 }
+const mailFontFamily = "'Arial Narrow',Arial,sans-serif";
 export function emailSignature(settings: Settings) {
   const e = escapeHtml;
   const title = settings.title.trim().replace(/(?:^|,\s*|\s+)SBM$/i, "");
@@ -338,11 +339,11 @@ export function emailSignature(settings: Settings) {
     email,
     '<a href="https://www.beximcopharma.com" style="color:#404040;text-decoration:underline">www.beximcopharma.com</a>',
   ].filter(Boolean).join(" | ");
-  return `<div data-email-signature="true" style="font-family:Calibri,Arial,sans-serif;font-size:14pt;line-height:1.3;color:#404040;text-align:left"><p style="margin:0 0 28px;color:#2e74b5;font-weight:bold">Thanks &amp; Regards,</p><p style="margin:0"><strong style="color:#2e74b5">${e(settings.name)}</strong> | ${title ? e(title) + ", " : ""}SBM | Beximco Pharmaceuticals PLC | 19 Dhanmondi R/A, Road #7, Dhaka 1205 | Bangladesh<br>${contacts}</p></div>`;
+  return `<div data-email-signature="true" style="font-family:${mailFontFamily};font-size:14pt;line-height:1.3;color:#404040;text-align:left"><p style="margin:0 0 28px;color:#2e74b5;font-weight:bold">Thanks &amp; Regards,</p><p style="margin:0"><strong style="color:#2e74b5">${e(settings.name)}</strong> | ${title ? e(title) + ", " : ""}SBM | Beximco Pharmaceuticals PLC | 19 Dhanmondi R/A, Road #7, Dhaka 1205 | Bangladesh<br>${contacts}</p></div>`;
 }
 export function territoryShareHtml(label: "ASE" | "MPE", brand: string, groups: TerritoryRxShare[] | undefined, national?: NationalRxShare) {
   const e = escapeHtml;
-  const cell = "padding:6px 4px;border:1px solid #d7e3ee;text-align:center;vertical-align:middle;line-height:1.4;overflow-wrap:anywhere";
+  const cell = "font-family:'Arial Narrow',Arial,sans-serif;padding:6px 4px;border:1px solid #d7e3ee;text-align:center;vertical-align:middle;line-height:1.4;overflow-wrap:anywhere";
   const rows: string[] = [];
   for (let offset = 0; offset < (groups?.length || 0); offset += 8) {
     const values = groups!.slice(offset, offset + 8);
@@ -353,7 +354,7 @@ export function territoryShareHtml(label: "ASE" | "MPE", brand: string, groups: 
     }).join("");
     rows.push(`<tr><th class="rx-territory-label" style="${cell};width:16%;background:#12314b;color:white;font-size:11px;font-weight:normal">${label} CODE<br>Generic/Brand<br>Rx Share</th>${cells}</tr>`);
   }
-  return `<div data-email-section="${label}Share" style="margin:14px 0"><p style="font-weight:bold;margin:0 0 8px">${label} wise ${e(brand)} Rx Share</p>${rows.length ? `<table class="rx-territory-table" role="presentation" aria-label="${label} wise Rx share" style="border-collapse:collapse;table-layout:fixed;width:100%;font-size:12px">${rows.join("")}</table>` : '<p style="font-size:12px;color:#566b80;margin:0">No Rx records in this region.</p>'}${label === "ASE" && groups?.some(g => g.code === "Unassigned") ? '<p style="font-size:11px;color:#566b80;margin:5px 0 0">Unassigned = ASE code unavailable. Re-import the original MRW file to include missing ASE details.</p>' : ""}</div>`;
+  return `<div data-email-section="${label}Share" style="margin:14px 0"><p style="font-weight:bold;margin:0 0 8px">${label} wise ${e(brand)} Rx Share</p>${rows.length ? `<table class="rx-territory-table" role="presentation" aria-label="${label} wise Rx share" style="font-family:${mailFontFamily};border-collapse:collapse;table-layout:fixed;width:100%;font-size:12px">${rows.join("")}</table>` : '<p style="font-size:12px;color:#566b80;margin:0">No Rx records in this region.</p>'}${label === "ASE" && groups?.some(g => g.code === "Unassigned") ? '<p style="font-size:11px;color:#566b80;margin:5px 0 0">Unassigned = ASE code unavailable. Re-import the original MRW file to include missing ASE details.</p>' : ""}</div>`;
 }
 export function emailHtml(
   report: RegionReport,
@@ -364,7 +365,7 @@ export function emailHtml(
   national: NationalRxShare | undefined = report.national,
 ) {
   const e = escapeHtml;
-  const cell = "padding:10px 8px;border-bottom:1px solid #d7e3ee;text-align:center;vertical-align:middle;overflow-wrap:anywhere";
+  const cell = "font-family:'Arial Narrow',Arial,sans-serif;padding:10px 8px;border-bottom:1px solid #d7e3ee;text-align:center;vertical-align:middle;overflow-wrap:anywhere";
   const head = (v: string, detail = false, width = 0) => `<th${detail ? ' class="rx-detail"' : ''} style="${cell};background:#12314b;color:#fff;font-size:12px;font-weight:bold${width ? ";width:" + width + "%" : ""}">${e(v)}</th>`;
   const colors = [
     ["#ddf7ef", "#007568"], ["#f1f6fd", "#224a8a"], ["#eee6fc", "#6339a7"],
@@ -395,15 +396,15 @@ export function emailHtml(
   const variables = emailVariables(report, profile, month, contact);
   const paragraph = (text: string) => text.trim() ? `<p style="margin:0 0 14px;line-height:1.6;color:#000000">${e(fillEmailText(text, variables)).replace(/\r?\n/g, "<br>")}</p>` : "";
   const sections: Record<string, string> = {
-    RegionalShare: `<div data-email-section="RegionalShare"><p style="font-weight:bold;margin:0 0 12px;color:#000000">Regional Rx share</p><p data-national-comparison="true" style="margin:0 0 14px;line-height:1.6;color:#000000">The National Rx share of <b>${e(profile.brand)}</b> is <b>${benchmark}</b> whereas yours is <b data-regional-share="true" style="color:${comparisonColor}">${regionalShare}</b>.</p><table role="presentation" style="border-collapse:collapse;width:100%;table-layout:fixed"><tr>${shares}</tr></table><p style="font-size:11px;color:#566b80;margin:8px 0 18px">Share of all ${e(profile.generic)} Rx · Total ${report.total}</p></div>`,
+    RegionalShare: `<div data-email-section="RegionalShare"><p style="font-weight:bold;margin:0 0 12px;color:#000000">Regional Rx share</p><p data-national-comparison="true" style="margin:0 0 14px;line-height:1.6;color:#000000">The National Rx share of <b>${e(profile.brand)}</b> is <b>${benchmark}</b> whereas yours is <b data-regional-share="true" style="color:${comparisonColor}">${regionalShare}</b>.</p><table role="presentation" style="font-family:${mailFontFamily};border-collapse:collapse;width:100%;table-layout:fixed"><tr>${shares}</tr></table><p style="font-size:11px;color:#566b80;margin:8px 0 18px">Share of all ${e(profile.generic)} Rx · Total ${report.total}</p></div>`,
     ASEShare: territoryShareHtml("ASE", profile.brand, report.aseShares, national),
     MPEShare: territoryShareHtml("MPE", profile.brand, report.mpeShares, national),
-    Prescribers: `<div data-email-section="Prescribers"><p style="font-weight:bold;margin:0 0 12px">Prescriber list</p><table aria-label="Prescriber list" style="border-collapse:collapse;table-layout:fixed;width:100%;font-size:12px"><thead><tr>${["MPE", "Doctor code", "Doctor name", "Specialty", "Generic Rx", profile.brand + " Rx", profile.brand + " share", "Other Brand"].map((h, i) => head(h, [0, 3, 7].includes(i), [6, 10, 20, 10, 8, 8, 10, 28][i])).join("")}</tr></thead><tbody>${rows}</tbody></table>${national?.available ? `<p style="font-size:11px;color:#b42335;margin:10px 0 20px">↓ Red = below national ${e(profile.brand)} share (${benchmark}).</p>` : '<p style="font-size:11px;color:#566b80;margin:10px 0 20px">National benchmark unavailable.</p>'}</div>`,
+    Prescribers: `<div data-email-section="Prescribers"><p style="font-weight:bold;margin:0 0 12px">Prescriber list</p><table aria-label="Prescriber list" style="font-family:${mailFontFamily};border-collapse:collapse;table-layout:fixed;width:100%;font-size:12px"><thead><tr>${["MPE", "Doctor code", "Doctor name", "Specialty", "Generic Rx", profile.brand + " Rx", profile.brand + " share", "Other Brand"].map((h, i) => head(h, [0, 3, 7].includes(i), [6, 10, 20, 10, 8, 8, 10, 28][i])).join("")}</tr></thead><tbody>${rows}</tbody></table>${national?.available ? `<p style="font-size:11px;color:#b42335;margin:10px 0 20px">↓ Red = below national ${e(profile.brand)} share (${benchmark}).</p>` : '<p style="font-size:11px;color:#566b80;margin:10px 0 20px">National benchmark unavailable.</p>'}</div>`,
   };
   const body = template.body.split(/(\{(?:RegionalShare|ASEShare|MPEShare|Prescribers)\})/g)
     .map(part => /^\{(?:RegionalShare|ASEShare|MPEShare|Prescribers)\}$/.test(part) ? sections[part.slice(1, -1)] : paragraph(part)).join("");
   const salutation = /Bhai$/i.test(contact.salutation.trim()) ? contact.salutation.trim() : contact.salutation.trim() + " Bhai";
-  return `<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body.rx-compact .rx-detail{display:none}body.rx-compact .rx-share-value{font-size:14px}@media(max-width:600px){.rx-territory-table tr{display:block}.rx-territory-table td,.rx-territory-table th{display:inline-block;box-sizing:border-box;width:33.333%!important}}</style></head><body style="margin:0;padding:24px 16px;font:14px Arial,sans-serif;color:#000000;background:#fff"><div style="max-width:1100px;margin:auto"><p style="margin:0 0 14px;color:#000000">Dear ${e(salutation)},</p><div data-email-opening="true">${paragraph(template.opening)}</div>${body}<div style="margin-top:24px">${emailSignature(settings)}</div></div></body></html>`;
+  return `<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body,body *{font-family:${mailFontFamily}}body.rx-compact .rx-detail{display:none}body.rx-compact .rx-share-value{font-size:14px}@media(max-width:600px){.rx-territory-table tr{display:block}.rx-territory-table td,.rx-territory-table th{display:inline-block;box-sizing:border-box;width:33.333%!important}}</style></head><body style="margin:0;padding:24px 16px;font:14px ${mailFontFamily};color:#000000;background:#fff"><div style="max-width:1100px;margin:auto"><p style="margin:0 0 14px;color:#000000">Dear ${e(salutation)},</p><div data-email-opening="true">${paragraph(template.opening)}</div>${body}<div style="margin-top:24px">${emailSignature(settings)}</div></div></body></html>`;
 
 }
 export function makeMail(

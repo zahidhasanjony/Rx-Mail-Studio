@@ -68,6 +68,11 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
         w.document.querySelectorAll(".queue-table input[type=checkbox]:checked").length === 7,
     );
     assert.match(w.document.body.textContent, /fictional doctors/);
+    const initialFormat = w.document.querySelector(".batch-download-choice select");
+    assert.equal(initialFormat.value, "excel", "Outlook Excel is the default download");
+    initialFormat.value = "eml";
+    initialFormat.dispatchEvent(new w.Event("change", { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 20));
     assert.equal(
       w.document.querySelectorAll(".queue-table input[type=checkbox]:checked")
         .length,
@@ -190,6 +195,7 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
       const htmlPart = exported.match(/Content-Type: text\/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n([\s\S]*?)\r\n--/)?.[1];
       assert.ok(htmlPart, "Selected doctor list reaches the .eml batch export");
       const emailDoc = new JSDOM(Buffer.from(htmlPart, "base64").toString("utf8")).window.document;
+      assert.match(emailDoc.body.style.fontFamily, /Arial Narrow/);
       assert.equal(emailDoc.querySelectorAll('table[aria-label="Prescriber list"] tbody tr').length, 1, name);
       assert.equal(emailDoc.querySelector('table[aria-label="Prescriber list"] tbody tr').children[2].textContent, "Sample Doctor 1");
       assert.match(emailDoc.body.textContent,/Team note for/);
@@ -201,7 +207,7 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
     [...w.document.querySelectorAll(".sidebar nav button")].find(b => b.querySelector("span")?.textContent === "Generate emails").click();
     await waitFor(() => w.document.querySelector(".batch-download-choice select"));
     const format = w.document.querySelector(".batch-download-choice select");
-    assert.equal(format.value, "eml", "Existing export remains the default");
+    assert.equal(format.value, "eml", "The user can choose and retain .eml ZIP for this session");
     format.value = "excel";
     format.dispatchEvent(new w.Event("change", { bubbles: true }));
     await new Promise(resolve => setTimeout(resolve, 20));
@@ -214,6 +220,7 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
     assert.ok(button("Download Outlook Excel (.xlsm)"));
     const generatedExcel = unzipSync(new Uint8Array(await downloads.at(-1).blob.arrayBuffer()));
     assert.match(strFromU8(generatedExcel["xl/worksheets/sheet1.xml"]), /Review TOFEN for/);
+    assert.match(strFromU8(generatedExcel["xl/worksheets/sheet2.xml"]), /Arial Narrow/);
     button("View history").click();
     await waitFor(() => w.document.querySelector(".batch-list"));
     button("Settings").click();

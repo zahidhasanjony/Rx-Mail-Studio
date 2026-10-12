@@ -32,7 +32,7 @@ In **Settings → Your email defaults**, enter the sender name, designation, ema
 
 ## Email export and Outlook
 
-Generating a batch downloads one ZIP containing a separate `.eml` file for every selected regional email. To, CC, sender, subject, regional Rx share summary, prescriber table and signature are preserved. Batch history can download the complete ZIP again, and previews or batch rows can download individual `.eml` files. Downloading keeps opening status unchanged.
+Generating a batch downloads an Outlook Excel `.xlsm` workbook by default. Choosing `.eml ZIP` downloads one ZIP containing a separate `.eml` file for every selected regional email. To, CC, subject, regional Rx share summary, prescriber table and signature are preserved. Newly generated emails use Arial Narrow throughout, including every table and the signature, with existing sizes and colours retained. Batch history offers both formats, and previews or batch rows can download individual `.eml` files. Downloading keeps opening status unchanged.
 
 Extract the ZIP and open the files in Outlook. UTF-8 MIME messages include a plain-text fallback and `X-Unsent: 1` to request editable opening. Email clients handle this differently; test one file in the intended Outlook version before using the full batch. No companion or PowerShell is needed for the `.eml` export. Review recipients and the sending account before sending manually.
 
@@ -46,7 +46,8 @@ The installed PWA supports mobile review and settings. Cloud sync requires a con
 
 Choose **Download format → Outlook Excel (.xlsm)** before generating, or use
 **Download Outlook Excel (.xlsm)** in the prepared batch window. Batch history
-also has an **Outlook Excel** button. The default remains `.eml ZIP`; all existing
+also has an **Outlook Excel** button. The default is `Outlook Excel (.xlsm)`;
+users can switch to `.eml ZIP`. All existing
 export and companion options remain available.
 
 Open the downloaded workbook in Excel for Windows with permitted VBA macros and

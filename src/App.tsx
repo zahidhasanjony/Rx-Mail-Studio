@@ -453,7 +453,7 @@ export default function App() {
       null,
     );
   const [brandSearch, setBrandSearch] = useState(""), [brandSearchDraft, setBrandSearchDraft] = useState("");
-  const [batchDownload, setBatchDownload] = useState<"eml" | "excel">("eml");
+  const [batchDownload, setBatchDownload] = useState<"eml" | "excel">("excel");
   const [excelDownloading, setExcelDownloading] = useState(false);
   const selectedBrand = useRef<BrandProfile>(starterProfiles[0]);
   const [month, setMonth] = useState("2026-06"),
@@ -1744,8 +1744,8 @@ export default function App() {
                   <label className="batch-download-choice">
                     Download format
                     <select value={batchDownload} onChange={e => setBatchDownload(e.target.value as "eml" | "excel")} disabled={busy || excelDownloading}>
-                      <option value="eml">.eml ZIP</option>
                       <option value="excel">Outlook Excel (.xlsm)</option>
+                      <option value="eml">.eml ZIP</option>
                     </select>
                   </label>
                   <Button

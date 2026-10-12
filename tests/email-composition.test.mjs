@@ -34,6 +34,9 @@ test("default mail matches the requested opening and horizontal three-line cells
   const mail = makeMail(report,profile,"July'26",hierarchy,settings,n);
   assert.equal(mail.subject, "Ketotifen (TOFEN) Prescriber List of A1 Region for July'26");
   const doc = new JSDOM(mail.html).window.document;
+  assert.match(doc.body.style.fontFamily, /Arial Narrow/);
+  assert.match(doc.querySelector('[data-email-signature]').style.fontFamily, /Arial Narrow/);
+  for (const element of doc.querySelectorAll('table,td,th')) assert.match(element.style.fontFamily, /Arial Narrow/);
   assert.match(doc.body.textContent,/Dear Zakir Bhai,/);
   assert.equal(doc.querySelector('[data-email-opening]').textContent,"Please find below the prescription share of TOFEN and prescribers list of Ketotifen in A1 Region for July'26.");
   assert.ok(!doc.body.textContent.includes("Ketotifen · TOFEN"));
