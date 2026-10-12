@@ -9,6 +9,7 @@ const version =
   crypto
     .createHash("sha256")
     .update(assets.join(","))
+    .update(fs.readFileSync("dist/Outlook-Emails-Template-v1.xlsm"))
     .digest("hex")
     .slice(0, 12);
 const shell = [
@@ -19,6 +20,7 @@ const shell = [
   "/icon-512.png",
   "/manifest.webmanifest",
   "/Start-Outlook-Bridge.ps1",
+  "/Outlook-Emails-Template-v1.xlsm",
   ...assets,
 ];
 fs.writeFileSync(

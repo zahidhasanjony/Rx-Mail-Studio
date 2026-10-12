@@ -28,6 +28,11 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
   w.TextEncoder = TextEncoder;
   w.TextDecoder = TextDecoder;
   w.Blob = Blob;
+  const excelTemplate = await readFile(new URL("../public/Outlook-Emails-Template-v1.xlsm", import.meta.url));
+  w.fetch = async url => {
+    assert.equal(url, "/Outlook-Emails-Template-v1.xlsm");
+    return new Response(excelTemplate, { status: 200 });
+  };
   const blobs = new Map(), downloads = [];
   w.URL.createObjectURL = (blob) => {
     const url = `blob:sample-${blobs.size}`;
@@ -128,6 +133,12 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
     w.document.querySelector('[aria-label="Download TOFEN 2026-06 .eml ZIP"]').click();
     assert.equal(downloads.length, 4);
     assert.match(w.document.querySelector(".batch-list").textContent, /0 opened/);
+    w.document.querySelector('[aria-label="Download TOFEN 2026-06 Outlook Excel"]').click();
+    await waitFor(() => downloads.at(-1)?.name.endsWith(".xlsm"));
+    const excelFiles = unzipSync(new Uint8Array(await downloads.at(-1).blob.arrayBuffer()));
+    assert.ok(excelFiles["xl/vbaProject.bin"]);
+    assert.match(strFromU8(excelFiles["xl/worksheets/sheet1.xml"]), /rse|example.com/i);
+    assert.match(w.document.querySelector(".batch-list").textContent, /0 opened/);
     [...w.document.querySelectorAll(".sidebar nav button")].find(b => b.querySelector("span")?.textContent === "Generate emails").click();
     await waitFor(() => w.document.querySelector('[aria-label="Specialty"]'));
     const specialty = w.document.querySelector('[aria-label="Specialty"]');
@@ -185,6 +196,24 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
       assert.ok(emailDoc.querySelector('table[aria-label="ASE wise Rx share"]'));
       assert.equal(emailDoc.querySelector('table[aria-label="MPE wise Rx share"]').querySelectorAll('td').length,5);
     }
+    button("View history").click();
+    await waitFor(() => w.document.querySelector(".batch-list"));
+    [...w.document.querySelectorAll(".sidebar nav button")].find(b => b.querySelector("span")?.textContent === "Generate emails").click();
+    await waitFor(() => w.document.querySelector(".batch-download-choice select"));
+    const format = w.document.querySelector(".batch-download-choice select");
+    assert.equal(format.value, "eml", "Existing export remains the default");
+    format.value = "excel";
+    format.dispatchEvent(new w.Event("change", { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const beforeExcel = downloads.length;
+    button("Generate 6 emails").click();
+    await waitFor(() => downloads.length === beforeExcel + 1);
+    assert.ok(downloads.at(-1).name.endsWith(".xlsm"));
+    assert.ok(button("Download .eml ZIP"), "Existing batch export remains available");
+    assert.ok(button("Download Outlook launcher"));
+    assert.ok(button("Download Outlook Excel (.xlsm)"));
+    const generatedExcel = unzipSync(new Uint8Array(await downloads.at(-1).blob.arrayBuffer()));
+    assert.match(strFromU8(generatedExcel["xl/worksheets/sheet1.xml"]), /Review TOFEN for/);
     button("View history").click();
     await waitFor(() => w.document.querySelector(".batch-list"));
     button("Settings").click();

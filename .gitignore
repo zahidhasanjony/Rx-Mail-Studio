@@ -11,3 +11,4 @@ dist/
 *.zip
 
 *.tsbuildinfo
+__pycache__/

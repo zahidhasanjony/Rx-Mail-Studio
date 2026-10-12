@@ -50,6 +50,9 @@ function address(contact: Contact, includeName = true) {
   ) throw new Error("An email address is invalid. Check To, CC and your signature email.");
   return includeName ? [...encodedWords(contact.name), `<${email}>`].join(" ") : email;
 }
+export function emailAddress(contact: Contact): string {
+  return address(contact, false);
+}
 function foldedHeader(name: string, value: string) {
   let line = name + ":", output = "";
   for (const token of value.split(" ").filter(Boolean)) {

@@ -86,6 +86,7 @@ import RegionReview from "./RegionReview";
 import EmailTemplateEditor from "./EmailTemplateEditor";
 import { emailTemplateFor, templateError } from "./email-template";
 import { download, outlookPackage, mailEml, emlFilename, emlPackage, emlPackageFilename, hierarchyCsv } from "./export";
+import { loadOutlookExcel, outlookExcelFilename, OUTLOOK_EXCEL_TYPE } from "./outlook-excel";
 import { hierarchyColumns, mapHierarchy, extraHierarchyCcMappings } from "./excel";
 import type { Sheet, HierarchyCcMapping } from "./excel";
 import { parseCsv } from "./csv";
@@ -452,6 +453,8 @@ export default function App() {
       null,
     );
   const [brandSearch, setBrandSearch] = useState(""), [brandSearchDraft, setBrandSearchDraft] = useState("");
+  const [batchDownload, setBatchDownload] = useState<"eml" | "excel">("eml");
+  const [excelDownloading, setExcelDownloading] = useState(false);
   const selectedBrand = useRef<BrandProfile>(starterProfiles[0]);
   const [month, setMonth] = useState("2026-06"),
     [endMonth, setEndMonth] = useState("2026-06"),
@@ -1075,7 +1078,8 @@ export default function App() {
         await update({ ...workspace, batches: [batch, ...workspace.batches] })
       ) {
         setBatchModal(batch);
-        downloadEmlBatch(batch);
+        if (batchDownload === "excel") await downloadExcelBatch(batch);
+        else downloadEmlBatch(batch);
         if (
           bridgeAuto &&
           mode !== "demo" &&
@@ -1097,6 +1101,19 @@ export default function App() {
       notify(`${batch.mails.length} .eml emails downloaded in one ZIP. Extract it and review in Outlook.`);
     } catch (e) {
       notify((e as Error).message + " Your prepared batch is saved in History.", true);
+    }
+  }
+  async function downloadExcelBatch(batch: Batch) {
+    if (excelDownloading) return;
+    setExcelDownloading(true);
+    try {
+      const bytes = await loadOutlookExcel(batch);
+      download(bytes as unknown as BlobPart, outlookExcelFilename(batch), OUTLOOK_EXCEL_TYPE);
+      notify(`${batch.mails.length} emails downloaded in Excel. Open the workbook and click Open all emails in Outlook.`);
+    } catch (e) {
+      notify((e as Error).message + " Your prepared batch is saved in History.", true);
+    } finally {
+      setExcelDownloading(false);
     }
   }
   function downloadEml(mail: RegionalMail, sender: Pick<Settings, "name" | "email">, createdAt?: string) {
@@ -1771,10 +1788,17 @@ export default function App() {
                 <div className="queue-footer">
                   <span>
                     <ShieldCheck size={15} />
-                    {selected.size} selected · .eml ZIP, manual sending
+                    {selected.size} selected · manual sending
                   </span>
+                  <label className="batch-download-choice">
+                    Download format
+                    <select value={batchDownload} onChange={e => setBatchDownload(e.target.value as "eml" | "excel")} disabled={busy || excelDownloading}>
+                      <option value="eml">.eml ZIP</option>
+                      <option value="excel">Outlook Excel (.xlsm)</option>
+                    </select>
+                  </label>
                   <Button
-                    disabled={busy || loading || !selected.size || !doctorSelectionValid || !!compositionError}
+                    disabled={busy || loading || excelDownloading || !selected.size || !doctorSelectionValid || !!compositionError}
                     onClick={generate}
                   >
                     <Mail size={17} />
@@ -2249,6 +2273,15 @@ export default function App() {
                       >
                         <Download size={15} />
                         .eml ZIP
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        disabled={excelDownloading}
+                        onClick={() => downloadExcelBatch(b)}
+                        aria-label={`Download ${b.brand} ${b.month} Outlook Excel`}
+                      >
+                        <FileSpreadsheet size={15} />
+                        Outlook Excel
                       </Button>
                       <Button
                         variant="secondary"
@@ -3402,6 +3435,11 @@ export default function App() {
               messages after you open them. The Classic Outlook options remain
               available below.
             </p>
+            <p className="tiny">
+              Outlook Excel contains the same prepared emails and an Open all emails in Outlook button.
+              Use Excel for Windows with permitted VBA macros and Classic Outlook.
+              Opening status stays in the workbook; save it before closing to retain that status.
+            </p>
           </div>
           <div className="modal-footer">
             <Button
@@ -3454,6 +3492,10 @@ export default function App() {
             <Button onClick={() => downloadEmlBatch(batchModal)}>
               <Download size={17} />
               Download .eml ZIP
+            </Button>
+            <Button variant="secondary" disabled={excelDownloading} onClick={() => downloadExcelBatch(batchModal)}>
+              <FileSpreadsheet size={17} />
+              {excelDownloading ? "Preparing Excel…" : "Download Outlook Excel (.xlsm)"}
             </Button>
           </div>
         </Modal>

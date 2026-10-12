@@ -102,6 +102,8 @@ input::placeholder, textarea::placeholder { color: #6f8194; }
 .badge.neutral { color: var(--rx-blue); background: var(--rx-blue-surface); }
 .queue-footer { gap: 12px; flex-wrap: wrap; padding: 18px 22px; border-color: var(--border); }
 .queue-footer > span { color: var(--muted); font-size: 11px; }
+.batch-download-choice { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.batch-download-choice select { width: auto; min-width: 165px; }
 .help-line { color: var(--muted); font-size: 12px; }
 .region-review { position: sticky; top: 20px; }
 .region-review .card-header { border-bottom: 0; padding-bottom: 16px; }

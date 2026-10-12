@@ -42,6 +42,26 @@ The installed PWA supports mobile review and settings. Cloud sync requires a con
 
 ## Storage and validation
 
+### Outlook Excel export
+
+Choose **Download format → Outlook Excel (.xlsm)** before generating, or use
+**Download Outlook Excel (.xlsm)** in the prepared batch window. Batch history
+also has an **Outlook Excel** button. The default remains `.eml ZIP`; all existing
+export and companion options remain available.
+
+Open the downloaded workbook in Excel for Windows with permitted VBA macros and
+click **Open all emails in Outlook**. Classic Outlook opens each prepared email
+with its To, CC, subject, full formatted body and signature. The button does not
+call Save or Send, run CMD/PowerShell, or contact the website. Outlook's own
+autosave setting still applies. Review the sending account and send manually.
+
+Rows record Opened or Failed with details. Clicking again skips Opened rows and
+retries remaining emails. Save the Excel workbook to retain those statuses after
+closing it. A fresh download starts a new opening session. Excel statuses do not
+change app history. Long bodies are stored in chunks and reconstructed with
+Unicode and formatting intact. Build details and desktop acceptance checks are
+in `assets/outlook/README.md`.
+
 Keep raw spreadsheets, email exports, credentials and recipient files out of Git. Monitor the target accounts' database usage and plan limits. The app does not purchase or upgrade services. Automated checks cover calculations, import parsing, routing, database access and the compiled interface. See `docs/verification.md` for remaining acceptance checks.
 
 ## Reporting ranges and admin controls
