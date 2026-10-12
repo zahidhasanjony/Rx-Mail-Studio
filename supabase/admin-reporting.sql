@@ -4,7 +4,7 @@ create table if not exists public.rxm_workspace_defaults (
   payload jsonb not null check (jsonb_typeof(payload) = 'object' and payload ?& array['subject','opening','body']),
   updated_at timestamptz not null default now()
 );
-insert into public.rxm_workspace_defaults(id,payload) values ('email', '{"subject":"{Generic} ({Brand}) Prescriber List of {Region} Region for {Period}","opening":"Please find below the prescription share and prescribers list of {Generic} and {Brand} Rx scenario in {Region} Region for {Period}.","body":"{RegionalShare}\n{ASEShare}\n{MPEShare}\n{Prescribers}"}') on conflict(id) do nothing;
+insert into public.rxm_workspace_defaults(id,payload) values ('email', '{"subject":"{Generic} ({Brand}) Prescriber List of {Region} Region for {Period}","opening":"Please find below the prescription share of {Brand} and prescribers list of {Generic} in {Region} Region for {Period}.","body":"{RegionalShare}\n{ASEShare}\n{MPEShare}\n{Prescribers}"}') on conflict(id) do nothing;
 alter table public.rxm_workspace_defaults enable row level security;
 revoke all on public.rxm_workspace_defaults from anon;
 grant select,insert,update,delete on public.rxm_workspace_defaults to authenticated;

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { reports, makeMail, selectReportDoctors } from "../src/engine.ts";
 import { defaultEmailTemplate, defaultSettings, starterProfiles } from "../src/types.ts";
+import { mailEml } from "../src/export.ts";
 import { templateError, emailTemplateFor } from "../src/email-template.ts";
 
 const profile = starterProfiles[0];
@@ -34,7 +35,7 @@ test("default mail matches the requested opening and horizontal three-line cells
   assert.equal(mail.subject, "Ketotifen (TOFEN) Prescriber List of A1 Region for July'26");
   const doc = new JSDOM(mail.html).window.document;
   assert.match(doc.body.textContent,/Dear Zakir Bhai,/);
-  assert.equal(doc.querySelector('[data-email-opening]').textContent,"Please find below the prescription share and prescribers list of Ketotifen and TOFEN Rx scenario in A1 Region for July'26.");
+  assert.equal(doc.querySelector('[data-email-opening]').textContent,"Please find below the prescription share of TOFEN and prescribers list of Ketotifen in A1 Region for July'26.");
   assert.ok(!doc.body.textContent.includes("Ketotifen · TOFEN"));
   assert.deepEqual([...doc.querySelectorAll('[data-email-section]')].map(d=>d.dataset.emailSection),["RegionalShare","ASEShare","MPEShare","Prescribers"]);
   const ase = doc.querySelector('table[aria-label="ASE wise Rx share"]');
@@ -78,4 +79,37 @@ test("horizontal summary wraps to another row only when needed, without empty fi
     assert.equal(table.querySelectorAll('td').length,9);
     assert.ok([...table.querySelectorAll('td')].every(td=>td.textContent.trim()));
   }
+});
+
+test("black opening, exact regional colours in both displays, and personal-first email-only recipients", () => {
+  const report = { ...reports([dataset],"2026-07",profile,["ACD"])[0], total:1000,own:242 };
+  const nasal = { ...profile, brand:"NASAL", generic:"Sodium Chloride" };
+  const regionalHierarchy = { ...hierarchy, rows:[{ ...hierarchy.rows[0],salutation:"Mojibur",cc:[
+    {name:"Hierarchy lead",email:"lead@example.com"},{name:"Duplicate team",email:"TEAM@example.com"},
+    {name:"RSE duplicate",email:"rse@example.com"},
+  ]}] };
+  const personal = { ...settings,personalCc:[{name:"Boss",email:"boss@example.com"},{name:"Team",email:"team@example.com"}] };
+  const render = benchmark => makeMail(report,nasal,"July'26",regionalHierarchy,personal,benchmark);
+  let mail = render({total:1000,own:131,share:13.1,available:true});
+  let doc = new JSDOM(mail.html).window.document;
+  assert.equal(doc.body.style.color,"rgb(0, 0, 0)");
+  assert.equal(doc.querySelector('[data-email-opening] p').textContent,"Please find below the prescription share of NASAL and prescribers list of Sodium Chloride in A1 Region for July'26.");
+  assert.equal(doc.querySelector('[data-email-opening] p').style.color,"rgb(0, 0, 0)");
+  assert.equal(doc.querySelector('[data-national-comparison]').style.color,"rgb(0, 0, 0)");
+  assert.match(doc.querySelector('[data-national-comparison]').textContent,/13.1% whereas yours is 24.2%/);
+  for (const selector of ['[data-regional-share]','[data-regional-table-share]']) assert.equal(doc.querySelector(selector).style.color,"rgb(0, 117, 104)");
+  mail = render({total:1000000,own:242001,share:24.2001,available:true});
+  doc = new JSDOM(mail.html).window.document;
+  for (const selector of ['[data-regional-share]','[data-regional-table-share]']) assert.equal(doc.querySelector(selector).style.color,"rgb(180, 35, 53)","Use full counts even when both percentages round to 24.2%");
+  doc = new JSDOM(render({total:1000,own:242,share:24.2,available:true}).html).window.document;
+  for (const selector of ['[data-regional-share]','[data-regional-table-share]']) assert.equal(doc.querySelector(selector).style.color,"rgb(0, 117, 104)","Equality is green");
+  doc = new JSDOM(render({total:0,own:0,share:null,available:false}).html).window.document;
+  for (const selector of ['[data-regional-share]','[data-regional-table-share]']) assert.equal(doc.querySelector(selector).style.color,"rgb(0, 0, 0)","Unavailable benchmarks do not imply an achievement colour");
+  assert.deepEqual(mail.cc.map(c=>c.email),['boss@example.com','team@example.com','lead@example.com']);
+  const headers = mailEml(mail,personal).split('\r\n\r\n')[0].replace(/\r\n[ \t]+/g,' ');
+  assert.match(headers,/To: rse@example.com\r\n/);
+  assert.match(headers,/Cc: boss@example.com, team@example.com, lead@example.com\r\n/);
+  assert.ok(!headers.includes('Hierarchy lead'));
+  assert.ok(!headers.includes('Example RSE'));
+  assert.deepEqual(emailTemplateFor({...settings,emailTemplate:{...defaultEmailTemplate,opening:'My custom opening'}}).opening,'My custom opening');
 });

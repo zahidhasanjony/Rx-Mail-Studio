@@ -1983,8 +1983,7 @@ export default function App() {
                   <div>
                     <h2>Regional recipients</h2>
                     <p>
-                      To: regional RSE · CC: hierarchy + your saved personal
-                      recipients
+                      To: regional RSE · CC: your saved personal recipients first, then hierarchy
                     </p>
                   </div>
                   <Button
@@ -2347,7 +2346,7 @@ export default function App() {
                   <hr />
                   <h3>Your team and boss in CC</h3>
                   <p className="muted">
-                    These recipients are added to every regional email after
+                    These recipients come first in every regional email, followed by
                     hierarchy CC.
                   </p>
                   <ContactsEditor
@@ -2676,7 +2675,7 @@ export default function App() {
       )}
       {preview && (
         <Modal title={preview.mail ? "Email preview" : preview.title} wide onClose={() => setPreview(null)}>
-          {preview.mail && <div className="preview-envelope"><div><strong>To {preview.mail.to.name}</strong><span>{preview.mail.to.email}</span><small>CC {preview.mail.cc.map(c => c.name || c.email).join(" · ") || "None"}</small><small className="preview-subject">Subject: {preview.mail.subject}</small></div><div className="preview-view" role="group" aria-label="Email table view"><button aria-pressed={compactPreview} className={compactPreview ? "active" : ""} onClick={() => setCompactPreview(true)}>Compact</button><button aria-pressed={!compactPreview} className={!compactPreview ? "active" : ""} onClick={() => setCompactPreview(false)}>Full table</button></div></div>}
+          {preview.mail && <div className="preview-envelope"><div><strong>To</strong><span>{preview.mail.to.email}</span><small>CC {preview.mail.cc.map(c => c.email).join("; ") || "None"}</small><small className="preview-subject">Subject: {preview.mail.subject}</small></div><div className="preview-view" role="group" aria-label="Email table view"><button aria-pressed={compactPreview} className={compactPreview ? "active" : ""} onClick={() => setCompactPreview(true)}>Compact</button><button aria-pressed={!compactPreview} className={!compactPreview ? "active" : ""} onClick={() => setCompactPreview(false)}>Full table</button></div></div>}
           <iframe
             className="email-preview"
             title="Email preview"

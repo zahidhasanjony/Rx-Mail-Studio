@@ -4,7 +4,10 @@ import type { BrandProfile, EmailTemplate, HierarchyRow, RegionReport, Settings 
 export const sectionTokens = ["RegionalShare", "ASEShare", "MPEShare", "Prescribers"] as const;
 const textTokens = ["Generic", "Brand", "Region", "Structure", "Period", "RSE"];
 export function emailTemplateFor(settings: Settings): EmailTemplate {
-  return { ...defaultEmailTemplate, ...settings.emailTemplate };
+  const template = { ...defaultEmailTemplate, ...settings.emailTemplate };
+  if (["Please find below the prescription share and prescribers list of {Generic} and {Brand} Rx scenario in {Region} Region for {Period}.",
+    "Please find below the prescription share and prescribers list of {Generic} and {Brand} Rx scenario in {Region} Region."].includes(template.opening)) template.opening = defaultEmailTemplate.opening;
+  return template;
 }
 export function templateError(template: EmailTemplate) {
   if (!template.subject.trim()) return "Enter an email subject.";

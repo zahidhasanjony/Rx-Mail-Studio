@@ -89,7 +89,7 @@ export interface EmailTemplate {
 }
 export const defaultEmailTemplate: EmailTemplate = {
   subject: "{Generic} ({Brand}) Prescriber List of {Region} Region for {Period}",
-  opening: "Please find below the prescription share and prescribers list of {Generic} and {Brand} Rx scenario in {Region} Region for {Period}.",
+  opening: "Please find below the prescription share of {Brand} and prescribers list of {Generic} in {Region} Region for {Period}.",
   body: "{RegionalShare}\n{ASEShare}\n{MPEShare}\n{Prescribers}",
 };
 export interface TerritoryRxShare {

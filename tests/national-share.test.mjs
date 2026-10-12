@@ -96,10 +96,10 @@ test("Other Brand restores all competitor names and counts; regional comparison 
   assert.equal(doc.querySelector('[data-regional-share]').style.color, "rgb(0, 117, 104)");
   doc = render({ ...r, own: 0, total: 0 });
   assert.equal(doc.querySelector('[data-regional-share]').textContent, "N/A");
-  assert.equal(doc.querySelector('[data-regional-share]').style.color, "rgb(86, 107, 128)");
+  assert.equal(doc.querySelector('[data-regional-share]').style.color, "rgb(0, 0, 0)");
   doc = render(r, { ...n, available: false, share: null });
   assert.match(doc.querySelector('[data-national-comparison]').textContent, /is N\/A/);
-  assert.equal(doc.querySelector('[data-regional-share]').style.color, "rgb(86, 107, 128)");
+  assert.equal(doc.querySelector('[data-regional-share]').style.color, "rgb(0, 0, 0)");
 });
 test("signature matches the reference styling, fixed company details and safely escaped personal fields", () => {
   const personal = { ...settings, name: 'Sample <script>alert(1)</script>', title: "Assistant Manager, SBM", extension: "123", mobile: "+880 1000000000, +880 1000000001", company: "Obsolete company", address: "Obsolete address", closing: "Old closing" };

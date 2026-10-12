@@ -210,7 +210,7 @@ test("email escapes source text, preserves To/CC, and deduplicates CC", () => {
   assert.equal(mail.to.email, "rse@example.com");
   assert.deepEqual(
     mail.cc.map((c) => c.email),
-    ["manager@example.com", "boss@example.com", "team@example.com"],
+    ["boss@example.com", "team@example.com", "manager@example.com"],
   );
   assert.match(mail.html, /Dear Sample Bhai,/);
   assert.match(mail.html, /&lt;script&gt;/);

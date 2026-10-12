@@ -39,8 +39,8 @@ test("EML retains To, CC, sender, Unicode subject, full HTML and a text fallback
   assert.ok(!/(?<!\r)\n|\r(?!\n)/.test(raw), "MIME uses CRLF line endings");
   assert.match(result.headers, /^X-Unsent: 1\r\n/);
   assert.match(result.decodedHeaders, /From: Sample Sender <owner@example.com>/);
-  assert.match(result.decodedHeaders, /To: Zakir Bhai <rse@example.com>/);
-  assert.match(result.decodedHeaders, /Cc: Hierarchy lead <lead@example.com>, SBM team <team@example.com>/);
+  assert.match(result.decodedHeaders, /To: rse@example.com/);
+  assert.match(result.decodedHeaders, /Cc: lead@example.com, team@example.com/);
   assert.ok(result.decodedHeaders.includes(`Subject: ${mail.subject}`));
   assert.match(result.headers, /Date: Sun, 11 Oct 2026 15:00:00 \+0000/);
   assert.equal(result.html, mail.html);
@@ -56,7 +56,7 @@ test("long Unicode names and subjects fold without breaking characters or MIME l
   assert.ok(raw.split("\r\n").every((line) => line.length <= 76));
   for (const word of raw.match(/=\?UTF-8\?B\?[^?]+\?=/g) || []) assert.ok(word.length <= 75);
   assert.ok(result.decodedHeaders.includes(`Subject: ${long.subject.trim()}`));
-  assert.ok(result.decodedHeaders.includes(`To: ${long.to.name.trim()} <rse@example.com>`));
+  assert.ok(result.decodedHeaders.includes(`To: rse@example.com`));
   assert.ok(!result.decodedHeaders.includes("�"));
 });
 test("header injection and unsafe export names cannot add recipients or archive paths", () => {

@@ -43,12 +43,12 @@ function encodedWords(value: string) {
   if (chunk) words.push(`=?UTF-8?B?${base64(chunk)}?=`);
   return words;
 }
-function address(contact: Contact) {
+function address(contact: Contact, includeName = true) {
   const email = contact.email.trim();
   if (
     !/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,}$/.test(email)
   ) throw new Error("An email address is invalid. Check To, CC and your signature email.");
-  return [...encodedWords(contact.name), `<${email}>`].join(" ");
+  return includeName ? [...encodedWords(contact.name), `<${email}>`].join(" ") : email;
 }
 function foldedHeader(name: string, value: string) {
   let line = name + ":", output = "";
@@ -90,8 +90,8 @@ export function mailEml(
   const headers = [
     "X-Unsent: 1",
     foldedHeader("From", address(sender)),
-    foldedHeader("To", address(mail.to)),
-    ...(mail.cc.length ? [foldedHeader("Cc", mail.cc.map(address).join(", "))] : []),
+    foldedHeader("To", address(mail.to, false)),
+    ...(mail.cc.length ? [foldedHeader("Cc", mail.cc.map(contact => address(contact, false)).join(", "))] : []),
     foldedHeader("Subject", encodedWords(mail.subject).join(" ")),
     "Date: " + date.toUTCString().replace("GMT", "+0000"),
     `Message-ID: <${mail.id.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 64) || crypto.randomUUID()}@rx-mail-studio.local>`,
