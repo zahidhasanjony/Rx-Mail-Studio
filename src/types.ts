@@ -48,6 +48,7 @@ export interface BrandProfile {
   aliases?: string[];
 }
 export interface Contact {
+  title?: string;
   name: string;
   email: string;
 }
@@ -86,8 +87,8 @@ export interface EmailTemplate {
   body: string;
 }
 export const defaultEmailTemplate: EmailTemplate = {
-  subject: "{Generic} Prescriber List · {Structure} {Region} Region · {Period}",
-  opening: "Please find below the prescription share and prescribers list of {Generic} and {Brand} Rx scenario in {Region} Region.",
+  subject: "{Generic} ({Brand}) Prescriber List of {Region} Region for {Period}",
+  opening: "Please find below the prescription share and prescribers list of {Generic} and {Brand} Rx scenario in {Region} Region for {Period}.",
   body: "{RegionalShare}\n{ASEShare}\n{MPEShare}\n{Prescribers}",
 };
 export interface TerritoryRxShare {
@@ -146,6 +147,7 @@ export interface Batch {
   id: string;
   createdAt: string;
   month: string;
+  endMonth?: string;
   period?: string;
   brand: string;
   generic: string;
@@ -158,6 +160,7 @@ export interface Batch {
   doctorSelection?: DoctorSelection;
 }
 export interface Workspace {
+  sharedEmailTemplate?: EmailTemplate;
   datasets: Dataset[];
   hierarchies: Hierarchy[];
   profiles: BrandProfile[];

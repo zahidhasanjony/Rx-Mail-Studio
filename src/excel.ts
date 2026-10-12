@@ -1,7 +1,7 @@
 import { Unzip, UnzipInflate } from "fflate";
 import { SaxesParser } from "saxes";
 import { normalize } from "./engine";
-import type { BrandProfile, Dataset, HierarchyRow, RxFact } from "./types";
+import type { BrandProfile, Dataset, HierarchyRow, Contact, RxFact } from "./types";
 export interface Sheet {
   name: string;
   path: string;
@@ -464,9 +464,25 @@ export const hierarchyColumns = [
   "OBR Email",
   "Active",
 ];
+export interface HierarchyCcMapping {
+  title: string;
+  titleColumn: number;
+  nameColumn: number;
+  emailColumn: number;
+}
+export function extraHierarchyCcMappings(headers: string[]): HierarchyCcMapping[] {
+  return headers.flatMap((header, emailColumn) => {
+    const match = header.match(/^(.+?)\s+Email$/i);
+    if (!match || ["RSE", "MDR", "MST", "OBR"].includes(normalize(match[1]))) return [];
+    const title = match[1].trim();
+    return [{ title, emailColumn, nameColumn: headers.findIndex(h => normalize(h) === normalize(title + " Name")),
+      titleColumn: headers.findIndex(h => normalize(h) === normalize(title + " Title")) }];
+  });
+}
 export function mapHierarchy(
   rows: string[][],
   mapping: Record<string, number>,
+  extraCc: HierarchyCcMapping[] = [],
 ): HierarchyRow[] {
   return rows
     .slice(1)
@@ -485,15 +501,23 @@ export function mapHierarchy(
         rseName: get("RSE Name"),
         rseEmail: get("RSE Email"),
         salutation: get("Salutation"),
-        cc: ["MDR", "MST", "OBR"]
-          .map((role) => ({
-            name: get(role + " Name"),
-            email: get(role + " Email"),
-          }))
-          .filter((c) => c.email),
+        cc: deduplicateHierarchyContacts([
+          ...["MDR", "MST", "OBR"].map(title => ({ title, name: get(title + " Name"), email: get(title + " Email") })),
+          ...extraCc.map(cc => ({ title: String(row[cc.titleColumn] || cc.title).trim(),
+            name: String(row[cc.nameColumn] || "").trim(), email: String(row[cc.emailColumn] || "").trim() })),
+        ]),
         active: !["NO", "FALSE", "0", "INACTIVE"].includes(
           normalize(get("Active")),
         ),
       };
     });
+}
+
+function deduplicateHierarchyContacts(contacts: Contact[]) {
+  const seen = new Set<string>();
+  return contacts.filter(c => {
+    const email = c.email.toLowerCase();
+    if (!email || seen.has(email)) return false;
+    seen.add(email); return true;
+  });
 }

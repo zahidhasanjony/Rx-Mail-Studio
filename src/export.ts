@@ -1,5 +1,5 @@
 import { zipSync, strToU8 } from "fflate";
-import type { Batch, Contact, Mail, Settings } from "./types";
+import type { Batch, Contact, Mail, Settings, Hierarchy } from "./types";
 export function download(
   content: BlobPart,
   name: string,
@@ -110,7 +110,7 @@ export function emlFilename(mail: Mail) {
   return `${filePart(mail.structure)}-${filePart(mail.region)}-${filePart(mail.subject)}.eml`;
 }
 export function emlPackageFilename(batch: Batch) {
-  return `rx-mail-${filePart(batch.brand)}-${filePart(batch.month)}-${filePart(batch.id).slice(0, 8)}-eml.zip`;
+  return `rx-mail-${filePart(batch.brand)}-${filePart(batch.month + (batch.endMonth && batch.endMonth !== batch.month ? "-to-" + batch.endMonth : ""))}-${filePart(batch.id).slice(0, 8)}-eml.zip`;
 }
 export function emlPackage(batch: Batch) {
   if (!batch.mails.length) throw new Error("This batch has no emails to export.");
@@ -180,4 +180,14 @@ Read-Host 'Press Enter to close'
     ),
     "README.txt": strToU8(readme),
   });
+}
+
+export function hierarchyCsv(hierarchy: Hierarchy): string {
+  const size = Math.max(0, ...hierarchy.rows.map(r => r.cc.length));
+  const headers = ["Structure", "Region", "RSE Name", "RSE Email", "Salutation", "Active",
+    ...Array.from({ length: size }, (_, i) => [`CC${i + 1} Title`, `CC${i + 1} Name`, `CC${i + 1} Email`]).flat()];
+  const cell = (value: string) => `"${(/^[=+@\-\t\r\n]/.test(value) ? "'" + value : value).replaceAll('"', '""')}"`;
+  return "\ufeff" + [headers, ...hierarchy.rows.map(r => [r.structure, r.region, r.rseName, r.rseEmail, r.salutation, r.active ? "Yes" : "No",
+    ...Array.from({ length: size }, (_, i) => [r.cc[i]?.title || "", r.cc[i]?.name || "", r.cc[i]?.email || ""]).flat()])]
+    .map(row => row.map(cell).join(",")).join("\r\n") + "\r\n";
 }

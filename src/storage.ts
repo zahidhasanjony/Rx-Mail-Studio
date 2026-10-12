@@ -1,6 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Dataset, Workspace, RxFact, BrandProfile } from "./types";
 import { defaultSettings, emptyWorkspace, settingsForNewUser } from "./types";
+import { reportingMonths } from "./reporting";
+import { templateError } from "./email-template";
+import type { EmailTemplate, Hierarchy } from "./types";
 import { normalize, overlaps } from "./engine";
 export const cloudConfigured = Boolean(
   import.meta.env.VITE_SUPABASE_URL &&
@@ -53,6 +56,35 @@ export async function localSave(workspace: Workspace) {
 const fail = (error: { message: string } | null) => {
   if (error) throw new Error(error.message);
 };
+async function requireAdmin() {
+  if (!supabase) throw new Error("Cloud connection missing");
+  const user = await supabase.auth.getUser();
+  fail(user.error);
+  const membership = await supabase.from("rxm_members").select("role").eq("email", user.data.user?.email || "").maybeSingle();
+  fail(membership.error);
+  if (membership.data?.role !== "owner") throw new Error("Admin access required");
+  return supabase;
+}
+export async function cloudPublishEmailTemplate(template: EmailTemplate) {
+  const error = templateError(template);
+  if (error) throw new Error(error);
+  const client = await requireAdmin();
+  const result = await client.from("rxm_workspace_defaults").upsert({ id: "email", payload: template, updated_at: new Date().toISOString() });
+  fail(result.error);
+}
+export async function cloudDeleteSource(id: string) {
+  const client = await requireAdmin();
+  const result = await client.from("rxm_datasets").delete().eq("id", id).select("id");
+  fail(result.error);
+  if (!result.data?.length) throw new Error("This source could not be deleted. Refresh your workspace.");
+}
+export async function cloudExportHierarchy(id: string): Promise<Hierarchy> {
+  const client = await requireAdmin();
+  const result = await client.rpc("rxm_export_hierarchy", { hierarchy_id: id });
+  fail(result.error);
+  if (!result.data) throw new Error("Hierarchy version not found");
+  return result.data as Hierarchy;
+}
 export async function cloudLoad(): Promise<Workspace> {
   if (!supabase) throw new Error("Cloud connection is not configured");
   const { data: user, error: ue } = await supabase.auth.getUser();
@@ -94,11 +126,13 @@ export async function cloudLoad(): Promise<Workspace> {
       .select("payload")
       .eq("email", (user.user.email || "").toLowerCase())
       .maybeSingle(),
+    supabase.from("rxm_workspace_defaults").select("payload").eq("id", "email").maybeSingle(),
   ]);
   values.forEach((v) => fail(v.error));
   const base = emptyWorkspace();
   return {
     ...base,
+    sharedEmailTemplate: values[6].data?.payload,
     datasets: (values[0].data || []).map((d) => ({
       ...d.payload,
       id: d.id,
@@ -113,20 +147,21 @@ export async function cloudLoad(): Promise<Workspace> {
     settings: { ...settingsForNewUser(user.user.email || ""), ...(
       (values[4].data as { payload?: Workspace["settings"] } | null)?.payload ||
       (values[5].data as { payload?: Workspace["settings"] } | null)?.payload ||
-      {}) },
+      {}), ...(values[6].data?.payload ? { emailTemplate: values[6].data.payload } : {}) },
   };
 }
 export async function cloudHydrate(
   datasets: Dataset[],
   month: string,
   profile: BrandProfile,
+  endMonth = month,
 ) {
   if (!supabase) throw new Error("Cloud connection missing");
   const generics = [profile.generic, ...(profile.aliases || [])].map(normalize);
   const ids = datasets
     .filter(
       (d) =>
-        d.active && d.from.slice(0, 7) <= month && d.to.slice(0, 7) >= month,
+        d.active && d.from.slice(0, 7) <= endMonth && d.to.slice(0, 7) >= month,
     )
     .map((d) => d.id);
   if (!ids.length) return datasets;
@@ -137,7 +172,7 @@ export async function cloudHydrate(
       .from("rxm_fact_chunks")
       .select("dataset_id,payload")
       .in("dataset_id", ids)
-      .eq("month", month)
+      .in("month", reportingMonths(month, endMonth))
       .in("generic", generics)
       .order("id")
       .range(offset, offset + 99);
@@ -218,7 +253,7 @@ export async function cloudSave(
         });
         fail(finish.error);
       } catch (e) {
-        await supabase.from("rxm_datasets").delete().eq("id", d.id);
+        await supabase.rpc("rxm_cleanup_import", { dataset: d.id });
         throw e;
       }
     } else if (old.active !== d.active) {

@@ -68,12 +68,22 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
         .length,
       7,
     );
+    const fromMonth = w.document.querySelector('[aria-label="From month"]'), toMonth = w.document.querySelector('[aria-label="To month"]');
+    assert.equal(fromMonth.value, "2026-06"); assert.equal(toMonth.value, "2026-06");
+    const fillMonth = (input, value) => { Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype,"value").set.call(input,value); input.dispatchEvent(new w.Event("input",{bubbles:true})); };
+    fillMonth(toMonth, "2026-07");
+    await waitFor(() => w.document.body.textContent.includes("No source coverage for July'26"));
+    assert.ok([...w.document.querySelectorAll("button")].find(b => /^Generate \d+ emails$/.test(b.textContent.trim())).disabled);
+    fillMonth(toMonth, "2026-06");
+    await waitFor(() => button("Generate 6 emails") && !button("Generate 6 emails").disabled);
     w.document.querySelector('[aria-label="Preview D5 email"]').click();
     await waitFor(() => w.document.querySelector("iframe"));
     assert.match(
       w.document.querySelector("iframe").srcdoc,
       /Regional Rx share/,
     );
+    assert.match(w.document.querySelector(".preview-subject").textContent,/Ketotifen \(TOFEN\) Prescriber List of D5 Region for June'26/);
+    assert.match(w.document.querySelector("iframe").srcdoc, /Region for June&#39;26/);
     assert.match(w.document.querySelector("iframe").srcdoc, /Prescriber list/);
     assert.match(w.document.querySelector("iframe").srcdoc, /Doctor name/);
     assert.match(w.document.querySelector("iframe").srcdoc, />Sample Doctor 1<\/td>/);

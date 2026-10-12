@@ -2450,3 +2450,12 @@ textarea {
   padding: 13px;
   color: #889c7a;
 }
+
+.custom-cc-mapping { border: 1px solid #e1e8ec; border-radius: 12px; padding: 14px; margin: 12px 0; }
+@media (max-width: 600px) {
+  .filters .field:nth-child(3) { grid-column: auto; grid-row: auto; }
+  .filters .field:nth-child(4) { grid-column: 1/-1; grid-row: auto; }
+}
+
+.hierarchy-contact-edit { grid-template-columns: 0.7fr 1fr 1.3fr auto; }
+@media (max-width: 740px) { .hierarchy-contact-edit { grid-template-columns: 1fr auto; } .hierarchy-contact-edit input { grid-column: 1; grid-row: auto; } .hierarchy-contact-edit .icon-button { grid-column: 2; grid-row: 1; } }

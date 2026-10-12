@@ -38,9 +38,9 @@ export function workspaceToday(date = new Date()) {
   const get = (key: string) => parts.find((p) => p.type === key)!.value;
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
-export function eligibleDatasets(datasets: Dataset[], month: string) {
+export function eligibleDatasets(datasets: Dataset[], month: string, endMonth = month) {
   return datasets.filter(
-    (d) => d.active && d.from.slice(0, 7) <= month && d.to.slice(0, 7) >= month,
+    (d) => d.active && d.from.slice(0, 7) <= endMonth && d.to.slice(0, 7) >= month,
   );
 }
 export function overlaps(
@@ -49,9 +49,9 @@ export function overlaps(
 ) {
   return a.from <= b.to && b.from <= a.to;
 }
-export function dateInPeriod(date: string, month: string, period = "all") {
+export function dateInPeriod(date: string, month: string, period = "all", endMonth = month) {
   const day = Number(date.slice(8, 10));
-  return date.startsWith(month) && day >= 1 && day <= 31 &&
+  return date.slice(0, 7) >= month && date.slice(0, 7) <= endMonth && day >= 1 && day <= 31 &&
     (period === "all" || (period === "first" && day <= 10) ||
       (period === "second" && day >= 11 && day <= 20) ||
       (period === "third" && day >= 21));
@@ -59,15 +59,16 @@ export function dateInPeriod(date: string, month: string, period = "all") {
 export function nationalRxShare(
   datasets: Dataset[], month: string, profile: BrandProfile, period = "all",
   _expectedRegions: Pick<HierarchyRow, "structure" | "region" | "active">[] = [],
+  endMonth = month,
 ): NationalRxShare {
-  const sources = eligibleDatasets(datasets, month).filter(d => !d.includedGenerics ||
+  const sources = eligibleDatasets(datasets, month, endMonth).filter(d => !d.includedGenerics ||
     d.includedGenerics.some(g => [profile.generic, ...(profile.aliases || [])].map(normalize).includes(normalize(g))));
   const generics = new Set([profile.generic, ...(profile.aliases || [])].map(normalize));
   const forms = new Set(profile.forms.map(normalize));
   let total = 0, own = 0;
   for (const ds of sources) {
     for (const f of ds.facts) {
-      if (!dateInPeriod(f.date, month, period)) continue;
+      if (!dateInPeriod(f.date, month, period, endMonth)) continue;
       if (!generics.has(normalize(f.generic)) || (forms.size && !forms.has(normalize(f.form)))) continue;
       total += f.count;
       if (normalize(f.brand) === normalize(profile.brand)) own += f.count;
@@ -76,7 +77,7 @@ export function nationalRxShare(
   // Recipient hierarchy coverage controls regional sending, not source-wide Rx totals.
   // Overlapping active versions cannot establish a reliable national denominator.
   const overlap = sources.some((a, i) => sources.slice(i + 1).some(b =>
-    coverage([a], month).some(date => dateInPeriod(date, month, period) && coverage([b], month).includes(date))));
+    coverage([a], month, endMonth).some(date => dateInPeriod(date, month, period, endMonth) && coverage([b], month, endMonth).includes(date))));
   const reason = overlap ? "Active source dates overlap. Select one version." :
     !total ? "No Rx records for this market and period." : undefined;
   return { total, own, share: reason ? null : own / total * 100, available: !reason, ...(reason ? { reason } : {}) };
@@ -110,6 +111,7 @@ export function reports(
   profile: BrandProfile,
   structures: Structure[],
   period = "all",
+  endMonth = month,
 ): RegionReport[] {
   const maps = new Map<
     string,
@@ -126,15 +128,11 @@ export function reports(
       normalize,
     ),
     forms = profile.forms.map(normalize);
-  const national = nationalRxShare(datasets, month, profile, period);
-  for (const ds of eligibleDatasets(datasets, month))
+  const national = nationalRxShare(datasets, month, profile, period, [], endMonth);
+  for (const ds of eligibleDatasets(datasets, month, endMonth))
     for (const f of ds.facts) {
-      const day = Number(f.date.slice(8, 10));
       if (
-        !f.date.startsWith(month) ||
-        (period === "first" && day > 10) ||
-        (period === "second" && (day < 11 || day > 20)) ||
-        (period === "third" && day < 21) ||
+        !dateInPeriod(f.date, month, period, endMonth) ||
         !genericNames.includes(normalize(f.generic)) ||
         (forms.length && !forms.includes(normalize(f.form)))
       )
@@ -258,6 +256,7 @@ export function regionalQueue(
   brand: string,
   periodCovered: boolean,
   selectedDates?: string[],
+  selectedMonths?: string[],
 ) {
   const known = new Map<string, { structure: Structure; region: string }>();
   const covered = new Set<string>();
@@ -307,6 +306,12 @@ export function regionalQueue(
         row: recipient.row,
         error:
           recipient.error ||
+          (selectedMonths && selectedMonths.length > 1 && selectedMonths.some(month => !datasets.some(d => {
+            const dates = d.regionDates?.[structure]?.[region];
+            if (dates) return dates.some(date => date.startsWith(month) && scopeDates.has(date));
+            return (d.regions?.[structure]?.includes(region) || d.facts.some(f => (structure === "ACD" ? f.acdRegion : f.ccdRegion) === region)) &&
+              coverage([d], month).some(date => scopeDates.has(date));
+          })) ? "No regional source coverage for every selected month" : undefined) ||
           (!covered.has(key(structure, region)) || !periodCovered
             ? "No regional source coverage"
             : undefined),
@@ -339,12 +344,12 @@ export function territoryShareHtml(label: "ASE" | "MPE", brand: string, groups: 
   const e = escapeHtml;
   const cell = "padding:6px 4px;border:1px solid #d7e3ee;text-align:center;vertical-align:middle;line-height:1.4;overflow-wrap:anywhere";
   const rows: string[] = [];
-  for (let offset = 0; offset < (groups?.length || 0); offset += 6) {
-    const values = groups!.slice(offset, offset + 6);
+  for (let offset = 0; offset < (groups?.length || 0); offset += 8) {
+    const values = groups!.slice(offset, offset + 8);
     const cells = values.map(g => {
       const color = national?.available && g.genericCount > 0 ? belowNational(g, national) ? "#b42335" : "#007568" : "#566b80";
       const share = g.genericCount ? (g.ownCount / g.genericCount * 100).toFixed(1) + "%" : "N/A";
-      return `<td data-territory-code="${e(g.code)}" style="${cell};width:${84 / values.length}%"><b>${e(g.code)}</b><br>${g.genericCount}/${g.ownCount}<br><b style="color:${color}">${share}</b></td>`;
+      return `<td data-territory-code="${e(g.code)}" style="${cell};width:${84 / Math.min(8, groups!.length)}%"><b>${e(g.code)}</b><br>${g.genericCount}/${g.ownCount}<br><b style="color:${color}">${share}</b></td>`;
     }).join("");
     rows.push(`<tr><th class="rx-territory-label" style="${cell};width:16%;background:#12314b;color:white;font-size:11px;font-weight:normal">${label} CODE<br>Generic/Brand<br>Rx Share</th>${cells}</tr>`);
   }
@@ -444,18 +449,18 @@ export function makeMail(
     status: "Prepared",
   };
 }
-export function coverage(datasets: Dataset[], month: string) {
+export function coverage(datasets: Dataset[], month: string, endMonth = month) {
   const days = new Set<string>();
-  for (const ds of eligibleDatasets(datasets, month)) {
+  for (const ds of eligibleDatasets(datasets, month, endMonth)) {
     if (ds.dates) {
-      for (const date of ds.dates) if (date.startsWith(month)) days.add(date);
+      for (const date of ds.dates) if (date.slice(0, 7) >= month && date.slice(0, 7) <= endMonth) days.add(date);
       continue;
     }
     let date = new Date(ds.from + "T00:00:00Z");
     const end = new Date(ds.to + "T00:00:00Z");
     for (; date <= end; date.setUTCDate(date.getUTCDate() + 1)) {
       const s = date.toISOString().slice(0, 10);
-      if (s.startsWith(month)) days.add(s);
+      if (s.slice(0, 7) >= month && s.slice(0, 7) <= endMonth) days.add(s);
     }
   }
   return [...days].sort();

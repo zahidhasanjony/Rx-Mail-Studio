@@ -82,7 +82,7 @@ test("clean email has five centered brand cells, doctor codes, exact red rows an
 test("Other Brand restores all competitor names and counts; regional comparison uses exact percentages", () => {
   const r = reports([source([fact("TOFEN", 32), fact("Fenat", 1), fact("Toti", 2), fact("Other", 65)])], "2026-08", profile, ["ACD"])[0];
   const n = { total: 10000, own: 3201, share: 32.01, available: true };
-  const render = (report = r, benchmark = n) => new JSDOM(emailHtml(report, profile, "2026-08 · All available dates", hierarchy.rows[0], settings, benchmark)).window.document;
+  const render = (report = r, benchmark = n) => new JSDOM(emailHtml(report, profile, "August'26", hierarchy.rows[0], settings, benchmark)).window.document;
   let doc = render();
   assert.equal(doc.querySelector('table[aria-label="Prescriber list"] tbody tr').lastElementChild.textContent, "OTHER (65), TOTI (2), FENAT (1)");
   assert.equal(doc.querySelector('table[aria-label="Prescriber list"] thead tr').lastElementChild.textContent, "Other Brand");

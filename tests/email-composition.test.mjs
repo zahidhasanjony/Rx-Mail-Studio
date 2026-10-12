@@ -30,10 +30,11 @@ test("full-market ASE/MPE summaries use actual codes and survive specialty filte
 });
 test("default mail matches the requested opening and horizontal three-line cells without a generic-brand heading", () => {
   const report = selectReportDoctors(reports([dataset],"2026-07",profile,["ACD"])[0],{limit:1});
-  const mail = makeMail(report,profile,"2026-07",hierarchy,settings,n);
+  const mail = makeMail(report,profile,"July'26",hierarchy,settings,n);
+  assert.equal(mail.subject, "Ketotifen (TOFEN) Prescriber List of A1 Region for July'26");
   const doc = new JSDOM(mail.html).window.document;
   assert.match(doc.body.textContent,/Dear Zakir Bhai,/);
-  assert.equal(doc.querySelector('[data-email-opening]').textContent,"Please find below the prescription share and prescribers list of Ketotifen and TOFEN Rx scenario in A1 Region.");
+  assert.equal(doc.querySelector('[data-email-opening]').textContent,"Please find below the prescription share and prescribers list of Ketotifen and TOFEN Rx scenario in A1 Region for July'26.");
   assert.ok(!doc.body.textContent.includes("Ketotifen · TOFEN"));
   assert.deepEqual([...doc.querySelectorAll('[data-email-section]')].map(d=>d.dataset.emailSection),["RegionalShare","ASEShare","MPEShare","Prescribers"]);
   const ase = doc.querySelector('table[aria-label="ASE wise Rx share"]');
@@ -66,13 +67,15 @@ test("custom wording merges each region safely, preserves calculated tables and 
   assert.deepEqual(emailTemplateFor(settings),defaultEmailTemplate);
 });
 test("horizontal summary wraps to another row only when needed, without empty filler cells", () => {
-  const facts = Array.from({length:7},(_,i)=>fact("TOFEN",1,`A${i+1}1`,`A${i+1}0`));
+  const facts = Array.from({length:9},(_,i)=>fact("TOFEN",1,`A${i+1}1`,`A${i+1}0`));
   const r = reports([{...dataset,facts}],"2026-07",profile,["ACD"])[0];
   const doc = new JSDOM(makeMail(r,profile,"2026-07",hierarchy,settings,n).html).window.document;
   for (const label of ["ASE","MPE"]) {
     const table = doc.querySelector(`table[aria-label="${label} wise Rx share"]`);
     assert.equal(table.rows.length,2);
-    assert.equal(table.querySelectorAll('td').length,7);
+    assert.equal(table.rows[0].querySelectorAll("td").length,8);
+    assert.equal(table.rows[1].querySelectorAll("td").length,1);
+    assert.equal(table.querySelectorAll('td').length,9);
     assert.ok([...table.querySelectorAll('td')].every(td=>td.textContent.trim()));
   }
 });

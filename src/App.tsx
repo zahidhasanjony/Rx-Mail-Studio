@@ -73,6 +73,9 @@ import {
   cloudLoad,
   cloudHydrate,
   cloudSave,
+  cloudPublishEmailTemplate,
+  cloudDeleteSource,
+  cloudExportHierarchy,
 } from "./storage";
 import type { Mode } from "./storage";
 import { usernameSignIn, currentAccount, AccountServiceError } from "./auth";
@@ -81,9 +84,11 @@ import UsersPage from "./UsersPage";
 import RegionReview from "./RegionReview";
 import EmailTemplateEditor from "./EmailTemplateEditor";
 import { emailTemplateFor, templateError } from "./email-template";
-import { download, outlookPackage, mailEml, emlFilename, emlPackage, emlPackageFilename } from "./export";
-import { hierarchyColumns, mapHierarchy } from "./excel";
-import type { Sheet } from "./excel";
+import { download, outlookPackage, mailEml, emlFilename, emlPackage, emlPackageFilename, hierarchyCsv } from "./export";
+import { hierarchyColumns, mapHierarchy, extraHierarchyCcMappings } from "./excel";
+import type { Sheet, HierarchyCcMapping } from "./excel";
+import { parseCsv } from "./csv";
+import { reportingMonths, reportingPeriod } from "./reporting";
 import { demoWorkspace } from "./demo";
 import {
   bridgePackage,
@@ -107,12 +112,6 @@ const formatDate = (s: string) =>
   new Date(s + "T00:00:00Z").toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-const monthLabel = (s: string) =>
-  new Date(s + "-01T00:00:00Z").toLocaleDateString("en-GB", {
-    month: "long",
     year: "numeric",
     timeZone: "UTC",
   });
@@ -258,14 +257,17 @@ function Field({
 function ContactsEditor({
   value,
   onChange,
+  withTitles = false,
 }: {
+  withTitles?: boolean;
   value: Contact[];
   onChange: (v: Contact[]) => void;
 }) {
   return (
     <div className="contacts-editor">
       {value.map((c, i) => (
-        <div className="contact-edit" key={i}>
+        <div className={`contact-edit ${withTitles ? "hierarchy-contact-edit" : ""}`} key={i}>
+          {withTitles && <input aria-label={`CC ${i + 1} title`} placeholder="Role / title" value={c.title || ""} onChange={e => onChange(value.map((o, j) => i === j ? { ...o, title: e.target.value } : o))} />}
           <input
             aria-label={`CC ${i + 1} name`}
             placeholder="Name / designation"
@@ -448,6 +450,7 @@ export default function App() {
       null,
     );
   const [month, setMonth] = useState("2026-06"),
+    [endMonth, setEndMonth] = useState("2026-06"),
     [structure, setStructure] = useState<"ACD" | "CCD" | "Both">("ACD"),
     [period, setPeriod] = useState("all"),
     [profileId, setProfileId] = useState("tofen"),
@@ -485,6 +488,7 @@ export default function App() {
       name: string;
       rows: string[][];
       mapping: Record<string, number>;
+      extraCc: HierarchyCcMapping[];
     } | null>(null),
     [pendingHierarchy, setPendingHierarchy] = useState<HierarchyRow[] | null>(
       null,
@@ -499,7 +503,12 @@ export default function App() {
     [settingsDraft, setSettingsDraft] = useState<Settings>(workspace.settings);
   const [emailTemplate, setEmailTemplate] = useState(() => emailTemplateFor(workspace.settings));
   useEffect(() => setEmailTemplate(emailTemplateFor(workspace.settings)), [workspace.settings.emailTemplate]);
-  const compositionError = templateError(emailTemplate);
+  const wordingError = templateError(emailTemplate);
+  const isAdmin = mode === "cloud" && account?.role === "owner";
+  const [deleteSource, setDeleteSource] = useState<Dataset | null>(null);
+  const [publishDefault, setPublishDefault] = useState(false);
+  const selectedMonths = reportingMonths(month, endMonth);
+  const periodLabel = reportingPeriod(month, endMonth, period);
   const composeSettings = { ...workspace.settings, emailTemplate };
   const sourceInput = useRef<HTMLInputElement>(null),
     hierarchyInput = useRef<HTMLInputElement>(null),
@@ -527,7 +536,7 @@ export default function App() {
           const last = w.datasets
             .filter((d) => d.active)
             .sort((a, b) => b.to.localeCompare(a.to))[0];
-          if (last) setMonth(last.to.slice(0, 7));
+          if (last) { setMonth(last.to.slice(0, 7)); setEndMonth(last.to.slice(0, 7)); }
         }
       })
       .catch((e) => {
@@ -568,7 +577,7 @@ export default function App() {
     if (mode !== "cloud" || !profile) return;
     let alive = true;
     setLoading(true);
-    cloudHydrate(workspaceRef.current.datasets, month, profile)
+    cloudHydrate(workspaceRef.current.datasets, month, profile, endMonth)
       .then((ds) => {
         if (alive) {
           setWorkspace((w) => ({ ...w, datasets: ds }));
@@ -587,6 +596,7 @@ export default function App() {
   }, [
     mode,
     month,
+    endMonth,
     profile?.generic,
     profile?.aliases?.join(","),
     workspace.datasets.map((d) => d.id + ":" + d.active).join(","),
@@ -602,13 +612,17 @@ export default function App() {
           .includes(normalize(g)),
       ),
   );
-  const activeSources = eligibleDatasets(marketSources, month),
-    days = coverage(marketSources, month),
-    lastDay = new Date(
-      Number(month.slice(0, 4)),
-      Number(month.slice(5, 7)),
-      0,
-    ).getDate();
+  const activeSources = eligibleDatasets(marketSources, month, endMonth),
+    days = coverage(marketSources, month, endMonth),
+    lastDay = selectedMonths.reduce((sum, m) => sum + new Date(Number(m.slice(0, 4)), Number(m.slice(5)), 0).getDate(), 0);
+  const selectedDays = days.filter(date => period === "all" ||
+    (period === "first" && Number(date.slice(8)) <= 10) ||
+    (period === "second" && Number(date.slice(8)) >= 11 && Number(date.slice(8)) <= 20) ||
+    (period === "third" && Number(date.slice(8)) >= 21));
+  const missingMonths = selectedMonths.filter(m => !selectedDays.some(date => date.startsWith(m)));
+  const rangeError = !selectedMonths.length ? "Choose a valid From month and To month." : missingMonths.length ?
+    `No source coverage for ${missingMonths.map(m => reportingPeriod(m)).join(", ")} in this cycle. Upload or activate the matching MRW sources.` : undefined;
+  const compositionError = wordingError || rangeError;
   const currentHierarchy = hierarchyFor(
     workspace.hierarchies,
     workspaceToday(),
@@ -622,14 +636,15 @@ export default function App() {
             marketProfile,
             structure === "Both" ? ["ACD", "CCD"] : [structure],
             period,
+            endMonth,
           )
         : [],
-    [workspace.datasets, month, marketProfile, structure, period],
+    [workspace.datasets, month, endMonth, marketProfile, structure, period],
   );
   const national = useMemo(() => marketProfile
-    ? nationalRxShare(workspace.datasets, month, marketProfile, period)
+    ? nationalRxShare(workspace.datasets, month, marketProfile, period, [], endMonth)
     : { total: 0, own: 0, share: null, available: false, reason: "Choose a brand / generic." },
-    [workspace.datasets, month, marketProfile, period]);
+    [workspace.datasets, month, endMonth, marketProfile, period]);
   const specialtyOptions = useMemo(() => reportSpecialties(reportList), [reportList]);
   const chosenSpecialty = specialtyOptions.some(s => s.value === specialty) ? specialty : "";
   const doctorLimitValue = doctorMode === "top" ? Number(doctorLimit) : undefined;
@@ -647,32 +662,20 @@ export default function App() {
         currentHierarchy,
         structure === "Both" ? ["ACD", "CCD"] : [structure],
         profile?.brand || "",
-        days.some(
-          (date) =>
-            period === "all" ||
-            (period === "first" && Number(date.slice(8)) <= 10) ||
-            (period === "second" &&
-              Number(date.slice(8)) >= 11 &&
-              Number(date.slice(8)) <= 20) ||
-            (period === "third" && Number(date.slice(8)) >= 21),
-        ),
-        days.filter(
-          (date) =>
-            period === "all" ||
-            (period === "first" && Number(date.slice(8)) <= 10) ||
-            (period === "second" &&
-              Number(date.slice(8)) >= 11 &&
-              Number(date.slice(8)) <= 20) ||
-            (period === "third" && Number(date.slice(8)) >= 21),
-        ),
+        selectedDays.length > 0 && !rangeError,
+        selectedDays,
+        selectedMonths,
+
       ),
     [
       doctorReports,
       currentHierarchy,
       structure,
-      activeSources.length,
+      activeSources,
       period,
       month,
+      endMonth,
+      rangeError,
       profile,
     ],
   );
@@ -683,6 +686,7 @@ export default function App() {
     () => setSelected(new Set(validQueue.map((q) => key(q.report)))),
     [
       month,
+      endMonth,
       structure,
       period,
       profileId,
@@ -702,7 +706,7 @@ export default function App() {
     if (!doctorSelectionValid) { notify("Enter a positive whole number of doctors.", true); return; }
     if (compositionError) { notify(compositionError, true); return; }
     try {
-      const m = makeMail(report, marketProfile, month + " · " + periodText, currentHierarchy, composeSettings, national);
+      const m = makeMail(report, marketProfile, periodLabel, currentHierarchy, composeSettings, national);
       setPreview({ html: m.html, title: m.subject, mail: m, sender: { name: workspace.settings.name, email: workspace.settings.email } });
     } catch (e) { notify((e as Error).message, true); }
   };
@@ -734,7 +738,7 @@ export default function App() {
       const last = w.datasets
         .filter((d) => d.active)
         .sort((a, b) => b.to.localeCompare(a.to))[0];
-      if (last) setMonth(last.to.slice(0, 7));
+      if (last) { setMonth(last.to.slice(0, 7)); setEndMonth(last.to.slice(0, 7)); }
     } catch (e) {
       notify((e as Error).message, true);
     } finally {
@@ -783,6 +787,7 @@ export default function App() {
     kind: "source" | "hierarchy",
   ) {
     if (!file) return;
+    if (kind === "hierarchy" && !isAdmin) { notify("Only admins can upload or change the hierarchy.", true); return; }
     if (mode === "demo") {
       notify("Switch to your device workspace to import real data.", true);
       return;
@@ -826,6 +831,7 @@ export default function App() {
     setHierarchyMap({
       name,
       rows,
+      extraCc: extraHierarchyCcMappings(rows[0]),
       mapping: Object.fromEntries(
         hierarchyColumns.map((c) => [
           c,
@@ -972,11 +978,13 @@ export default function App() {
     if (await update(next)) {
       setPendingSource(null);
       setMonth(d.to.slice(0, 7));
+      setEndMonth(d.to.slice(0, 7));
       setPage("generate");
       notify(`${num(d.rows)} product occurrences imported`);
     }
   }
   async function saveHierarchy() {
+    if (!isAdmin) { notify("Admin access required", true); return; }
     if (!pendingHierarchy?.length) return;
     if (!hierarchyName.trim() || !effectiveDate) {
       notify("Give this hierarchy a name and effective date.", true);
@@ -1010,7 +1018,7 @@ export default function App() {
         makeMail(
           q.report,
           marketProfile,
-          month + " · " + periodText,
+          periodLabel,
           currentHierarchy,
           composeSettings,
           national,
@@ -1020,6 +1028,7 @@ export default function App() {
         id: crypto.randomUUID(),
         createdAt: new Date().toISOString(),
         month,
+        endMonth,
         period,
         brand: profile.brand,
         generic: profile.generic,
@@ -1200,6 +1209,7 @@ export default function App() {
     setWorkspace(demoWorkspace());
     setMode("demo");
     setMonth("2026-06");
+    setEndMonth("2026-06");
     setProfileId("tofen");
     setPage("generate");
   };
@@ -1370,7 +1380,7 @@ export default function App() {
             ) : page === "hierarchy" ? (
               <Button
                 onClick={() => hierarchyInput.current?.click()}
-                disabled={busy}
+                disabled={busy || !isAdmin}
               >
                 <UploadCloud size={17} />
                 Upload hierarchy
@@ -1405,18 +1415,21 @@ export default function App() {
               <section className="filter-card">
                 <h2 className="filter-title">Report selection</h2>
                 <div className="filters">
-                  <Field label="Reporting month">
+                  <Field label="From month">
                     <div className="input-icon">
                       <CalendarDays size={17} />
                       <input
                         type="month"
                         value={month}
                         onChange={(e) =>
-                          e.target.value && setMonth(e.target.value)
+                          e.target.value && (setMonth(e.target.value), endMonth < e.target.value && setEndMonth(e.target.value))
                         }
-                        aria-label="Reporting month"
+                        aria-label="From month"
                       />
                     </div>
+                  </Field>
+                  <Field label="To month" hint="Use the same month for a single-month report.">
+                    <input type="month" min={month} value={endMonth} onChange={e => e.target.value && setEndMonth(e.target.value)} aria-label="To month" />
                   </Field>
                   <Field label="Territory structure">
                     <select
@@ -1478,7 +1491,7 @@ export default function App() {
                       className={`status-dot ${days.length === lastDay ? "" : "amber"}`}
                     />
                     {days.length
-                      ? `${days.length} of ${lastDay} days available · ${monthLabel(month)}`
+                      ? `${days.length} of ${lastDay} days available · ${periodLabel}`
                       : "No source data for this market / month"}
                   </span>
                   <span className="market-tag">
@@ -1492,10 +1505,12 @@ export default function App() {
                   </span>
                 </div>
               </section>
+              {rangeError && <div className="notice benchmark-notice" role="status"><AlertCircle size={17} /><span>{rangeError}</span></div>}
+              {month !== endMonth && <p className="muted">One email per region combines this month range. The selected Flash applies to every month.</p>}
               <details className="card email-customization">
                 <summary>Customize email subject &amp; body</summary>
                 <div className="email-customization-body">
-                  <p className="muted">Changes apply to this batch. Save permanent wording in Your email defaults.</p>
+                  <p className="muted">Changes apply to this batch. Admins publish team defaults in Your email defaults.</p>
                   <EmailTemplateEditor value={emailTemplate} onChange={setEmailTemplate} />
                 </div>
               </details>
@@ -1756,7 +1771,7 @@ export default function App() {
                 </small>
               </section>
               <section className="upload-card hierarchy-upload" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); void selectFile(e.dataTransfer.files[0], "hierarchy"); }}>
-                <div className="upload-symbol"><Network size={31} /></div><h2>Quarterly hierarchy</h2><p>Upload the latest regional recipients.<br />Review RSE and PSL routing, then set the effective date.</p><Button variant="secondary" disabled={busy} onClick={() => hierarchyInput.current?.click()}>Choose hierarchy file <ArrowRight size={16} /></Button><small>Excel or CSV · Versioned by effective date</small>
+                <div className="upload-symbol"><Network size={31} /></div><h2>Quarterly hierarchy</h2><p>Upload the latest regional recipients.<br />Review RSE and PSL routing, then set the effective date.</p><Button variant="secondary" disabled={busy || !isAdmin} onClick={() => hierarchyInput.current?.click()}>Choose hierarchy file <ArrowRight size={16} /></Button><small>Excel or CSV · Versioned by effective date</small>
               </section>
               </div>
               <section className="card">
@@ -1832,6 +1847,7 @@ export default function App() {
                           >
                             {d.active ? "Deactivate" : "Activate"}
                           </Button>
+                          {isAdmin && <Button variant="text" disabled={busy} onClick={() => setDeleteSource(d)}><Trash2 size={15} />Delete</Button>}
                         </div>
                       ))}
                   </div>
@@ -1906,7 +1922,9 @@ export default function App() {
                   </div>
                   <Button
                     variant="secondary"
+                    disabled={!isAdmin}
                     onClick={() => {
+                      if (!isAdmin) return;
                       setPendingHierarchy(
                         currentHierarchy?.rows.map((r) => ({
                           ...r,
@@ -1924,6 +1942,11 @@ export default function App() {
                     <Plus size={16} />
                     Create version
                   </Button>
+                  {isAdmin && currentHierarchy && <Button variant="secondary" disabled={busy} onClick={async () => {
+                    setBusy(true);
+                    try { const hierarchy = await cloudExportHierarchy(currentHierarchy.id); download(hierarchyCsv(hierarchy), "full-hierarchy.csv", "text/csv;charset=utf-8"); }
+                    catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
+                  }}><Download size={16} />Download full hierarchy</Button>}
                 </div>
                 {currentHierarchy?.rows.length ? (
                   <div className="table-scroll">
@@ -1952,7 +1975,7 @@ export default function App() {
                             <td>
                               {r.cc.map((c) => (
                                 <span className="email-chip" key={c.email}>
-                                  {c.email}
+                                  {c.title ? `${c.title}: ` : ""}{c.email}
                                 </span>
                               ))}
                             </td>
@@ -1974,7 +1997,7 @@ export default function App() {
                     title="Connect your regions"
                     text="Upload your hierarchy workbook, map its columns and review each regional RSE and their hierarchy."
                     action={
-                      <Button onClick={() => hierarchyInput.current?.click()}>
+                      <Button disabled={!isAdmin} onClick={() => hierarchyInput.current?.click()}>
                         <UploadCloud size={16} />
                         Upload hierarchy
                       </Button>
@@ -2013,7 +2036,9 @@ export default function App() {
                         </span>
                         <button
                           className="text-link"
+                          disabled={!isAdmin}
                           onClick={() => {
+                            if (!isAdmin) return;
                             setPendingHierarchy(structuredClone(h.rows));
                             setHierarchyName(h.name + " · revised");
                             setEffectiveDate(workspaceToday());
@@ -2125,7 +2150,7 @@ export default function App() {
                           {b.brand} · {b.generic}
                         </strong>
                         <small>
-                          {monthLabel(b.month)} · {b.mails.length} regional
+                          {reportingPeriod(b.month, b.endMonth || b.month, b.period)} · {b.mails.length} regional
                           emails ·{" "}
                           {new Date(b.createdAt).toLocaleString("en-GB")}
                         </small>
@@ -2255,8 +2280,23 @@ export default function App() {
                     }
                   />
                   <hr />
-                  <h3>Default email wording</h3>
-                  <EmailTemplateEditor value={emailTemplateFor(settingsDraft)} onChange={emailTemplate => setSettingsDraft({ ...settingsDraft, emailTemplate })} />
+                  <h3>Team default email wording</h3>
+                  <p className="muted">Admins publish the shared subject and body. Your signature and personal CC stay saved for your account.</p>
+                  {isAdmin ? <>
+                    <EmailTemplateEditor value={emailTemplateFor(settingsDraft)} onChange={emailTemplate => setSettingsDraft({ ...settingsDraft, emailTemplate })} />
+                    <label className="sheet-choice"><input type="checkbox" checked={publishDefault} onChange={e => setPublishDefault(e.target.checked)} />Make this the default for all users</label>
+                    <Button variant="secondary" disabled={busy || !publishDefault || !!templateError(emailTemplateFor(settingsDraft))} onClick={async () => {
+                      setBusy(true);
+                      try {
+                        const shared = emailTemplateFor(settingsDraft);
+                        await cloudPublishEmailTemplate(shared);
+                        const next = { ...workspaceRef.current, sharedEmailTemplate: shared, settings: { ...workspaceRef.current.settings, emailTemplate: shared } };
+                        workspaceRef.current = next; setWorkspace(next); setEmailTemplate(shared); setPublishDefault(false);
+                        notify("Team email default published. It applies when users refresh their workspace.");
+                      } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
+                    }}>Publish team default</Button>
+                  </> : mode === "cloud" ? <p className="muted">Only admins can change the team default. You can customize subject and body for each batch in Generate emails.</p> :
+                    <EmailTemplateEditor value={emailTemplateFor(settingsDraft)} onChange={emailTemplate => setSettingsDraft({ ...settingsDraft, emailTemplate })} />}
                   <div className="settings-footer">
                     <Button
                       disabled={busy}
@@ -2279,7 +2319,7 @@ export default function App() {
                         if (
                           await update({
                             ...workspace,
-                            settings: settingsDraft,
+                            settings: { ...settingsDraft, ...(mode === "cloud" ? { emailTemplate: workspace.settings.emailTemplate } : {}) },
                           })
                         )
                           notify(mode === "demo" ? "Sample defaults updated for this session" : "Your defaults are saved");
@@ -2435,7 +2475,7 @@ export default function App() {
                           ],
                           hierarchies: [
                             ...existing.hierarchies,
-                            ...workspace.hierarchies.filter(
+                            ...(account?.role === "owner" ? workspace.hierarchies : []).filter(
                               (h) =>
                                 !existing.hierarchies.some(
                                   (o) => o.id === h.id,
@@ -2443,7 +2483,7 @@ export default function App() {
                             ),
                           ],
                           profiles: workspace.profiles,
-                          settings: workspace.settings,
+                          settings: { ...workspace.settings, emailTemplate: existing.settings.emailTemplate },
                           batches: [
                             ...workspace.batches,
                             ...existing.batches.filter(
@@ -2745,6 +2785,19 @@ export default function App() {
           </div>
         </Modal>
       )}
+      {deleteSource && <Modal title="Delete imported source?" onClose={() => !busy && setDeleteSource(null)}>
+        <div className="modal-body"><p><strong>{deleteSource.name}</strong></p><p>Delete this import and its {num(deleteSource.rows)} product occurrences from the reporting library? Existing prepared emails and batch history remain available.</p></div>
+        <div className="modal-footer"><Button variant="secondary" disabled={busy} onClick={() => setDeleteSource(null)}>Cancel</Button>
+          <Button disabled={busy || !isAdmin} onClick={async () => {
+            if (!isAdmin) return;
+            setBusy(true);
+            try {
+              await cloudDeleteSource(deleteSource.id);
+              const next = { ...workspaceRef.current, datasets: workspaceRef.current.datasets.filter(d => d.id !== deleteSource.id) };
+              workspaceRef.current = next; setWorkspace(next); setDeleteSource(null); notify("Source deleted. Prepared email history is preserved.");
+            } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
+          }}><Trash2 size={15} />Delete source</Button></div>
+      </Modal>}
       {hierarchyMap && (
         <Modal
           title="Map hierarchy columns"
@@ -2781,6 +2834,20 @@ export default function App() {
                 </Field>
               ))}
             </div>
+            <h3>Additional hierarchy CC</h3>
+            <p className="muted">Choose role titles from your file headers or from a title column. Blank contacts are skipped for that region.</p>
+            {hierarchyMap.extraCc.map((cc, index) => <div className="mapping-grid custom-cc-mapping" key={index}>
+              <Field label={`CC level ${index + 1} title`}><select value={cc.title} onChange={e => setHierarchyMap({ ...hierarchyMap, extraCc: hierarchyMap.extraCc.map((c, i) => i === index ? { ...c, title: e.target.value } : c) })}>
+                {[...new Set([cc.title, ...hierarchyMap.rows[0].filter(Boolean)])].map(h => <option key={h}>{h}</option>)}
+              </select></Field>
+              {([['Title column', 'titleColumn'], ['Name column', 'nameColumn'], ['Email column', 'emailColumn']] as const).map(([label, field]) => <Field key={field} label={`CC level ${index + 1} ${label}`}>
+                <select value={cc[field]} onChange={e => setHierarchyMap({ ...hierarchyMap, extraCc: hierarchyMap.extraCc.map((c, i) => i === index ? { ...c, [field]: Number(e.target.value) } : c) })}>
+                  <option value={-1}>{field === 'titleColumn' ? 'Use selected title' : 'Not mapped'}</option>
+                  {hierarchyMap.rows[0].map((header, i) => <option value={i} key={i}>{header || `Column ${i + 1}`}</option>)}
+                </select></Field>)}
+              <Button variant="text" onClick={() => setHierarchyMap({ ...hierarchyMap, extraCc: hierarchyMap.extraCc.filter((_, i) => i !== index) })}>Remove CC level</Button>
+            </div>)}
+            <Button variant="secondary" onClick={() => setHierarchyMap({ ...hierarchyMap, extraCc: [...hierarchyMap.extraCc, { title: hierarchyMap.rows[0].find(Boolean) || 'CC', titleColumn: -1, nameColumn: -1, emailColumn: -1 }] })}><Plus size={15} />Add hierarchy CC level</Button>
             <p className="tiny">
               Required: Structure, Region, RSE Name, RSE Email and Salutation.
               CC name columns are optional.
@@ -2803,8 +2870,10 @@ export default function App() {
                     ].some((k) => hierarchyMap.mapping[k] < 0)
                   )
                     throw new Error("Map all required hierarchy fields");
+                  if (!isAdmin) throw new Error("Admin access required");
+                  if (hierarchyMap.extraCc.some(cc => cc.emailColumn < 0)) throw new Error("Map an email column for each additional CC level.");
                   setPendingHierarchy(
-                    mapHierarchy(hierarchyMap.rows, hierarchyMap.mapping),
+                    mapHierarchy(hierarchyMap.rows, hierarchyMap.mapping, hierarchyMap.extraCc),
                   );
                   setHierarchyMap(null);
                 } catch (e) {
@@ -3007,6 +3076,7 @@ export default function App() {
             ))}
             <h3>Hierarchy CC</h3>
             <ContactsEditor
+              withTitles
               value={editingRow.row.cc}
               onChange={(cc) =>
                 setEditingRow({ ...editingRow, row: { ...editingRow.row, cc } })
@@ -3189,7 +3259,7 @@ export default function App() {
               </span>
               <div>
                 <h3>
-                  {batchModal.brand} · {monthLabel(batchModal.month)}
+                  {batchModal.brand} · {reportingPeriod(batchModal.month, batchModal.endMonth || batchModal.month, batchModal.period)}
                 </h3>
                 <p>
                   Recipients, prescriber tables and regional Rx shares are
@@ -3372,34 +3442,4 @@ export default function App() {
       )}
     </div>
   );
-}
-function parseCsv(text: string) {
-  const rows: string[][] = [];
-  let row: string[] = [],
-    field = "",
-    quoted = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (c === '"') {
-      if (quoted && text[i + 1] === '"') {
-        field += '"';
-        i++;
-      } else quoted = !quoted;
-    } else if (c === "," && !quoted) {
-      row.push(field);
-      field = "";
-    } else if (c === "\n" && !quoted) {
-      row.push(field.replace(/\r$/, ""));
-      if (row.some((v) => v.trim())) rows.push(row);
-      row = [];
-      field = "";
-    } else field += c;
-  }
-  if (quoted) throw new Error("Unclosed quote in CSV");
-  if (field || row.length) {
-    row.push(field.replace(/\r$/, ""));
-    rows.push(row);
-  }
-  if (rows[0]?.[0]) rows[0][0] = rows[0][0].replace(/^\uFEFF/, "");
-  return rows;
 }

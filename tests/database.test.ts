@@ -15,6 +15,7 @@ test("Postgres schema enforces verified team membership, private settings and ov
       ),
     );
     await db.exec(await readFile(new URL("../supabase/username-auth.sql", import.meta.url), "utf8"));
+    await db.exec(await readFile(new URL("../supabase/admin-reporting.sql", import.meta.url), "utf8"));
     const owner = "11111111-1111-4111-8111-111111111111",
       member = "22222222-2222-4222-8222-222222222222",
       outsider = "33333333-3333-4333-8333-333333333333";
@@ -64,7 +65,35 @@ test("Postgres schema enforces verified team membership, private settings and ov
       ).rows[0].id,
       second,
     );
+    const hierarchy = "66666666-6666-4666-8666-666666666666";
+    await db.exec(`insert into public.rxm_hierarchies(id,effective_from,created_at,payload) values('${hierarchy}','2026-01-01',now(),'{"name":"Test hierarchy"}');insert into public.rxm_batches values('99999999-9999-4999-8999-999999999999','${owner}',now(),'{"sourceIds":["${first}"],"mails":[{"html":"Frozen"}]}')`);
+    assert.equal((await db.query<{ result: { name: string } }>(`select public.rxm_export_hierarchy('${hierarchy}') as result`)).rows[0].result.name, "Test hierarchy");
+    const editor = "77777777-7777-4777-8777-777777777777";
+    await db.exec(`reset role;insert into auth.users(id,email,email_confirmed_at) values('${editor}','editor@example.com',now());insert into public.rxm_members values('editor@example.com','editor',now());insert into public.rxm_accounts(user_id,username,display_name,login_email,password_salt) values('${editor}','EDITOR','Editor','editor@example.com',repeat('e',64))`);
+    await identity(editor,"editor@example.com");
+    assert.equal((await db.query(`delete from public.rxm_datasets where id='${second}' returning id`)).rows.length,0,"Editors cannot delete library sources");
+    assert.equal((await db.query(`delete from public.rxm_fact_chunks where dataset_id='${second}' returning id`)).rows.length,0,"Editors cannot delete completed source chunks");
+    await assert.rejects(db.exec(`update public.rxm_datasets set complete=false where id='${second}'`),/permission denied/);
+    await assert.rejects(db.query(`select public.rxm_export_hierarchy('${hierarchy}')`),/Admin access required/);
+    await assert.rejects(db.exec(`insert into public.rxm_hierarchies(id,effective_from,created_at,payload) values('88888888-8888-4888-8888-888888888888','2026-01-01',now(),'{}')`),/row-level security/);
+    assert.equal((await db.query(`update public.rxm_workspace_defaults set payload='{"subject":"Editor","opening":"Text","body":"Text"}' where id='email' returning id`)).rows.length,0);
+    const failed = "88888888-8888-4888-8888-888888888888";
+    await db.exec(`insert into public.rxm_datasets(id,name,hash,from_date,to_date,imported_at,payload) values('${failed}','Failed','failed','2026-08-01','2026-08-10',now(),'{}')`);
+    await db.query(`select public.rxm_cleanup_import('${second}')`);
+    assert.equal((await db.query(`select id from public.rxm_datasets where id='${second}'`)).rows.length,1,"Cleanup cannot remove completed imports");
+    await db.query(`select public.rxm_cleanup_import('${failed}')`);
+    assert.equal((await db.query(`select id from public.rxm_datasets where id='${failed}'`)).rows.length,0,"Editors can recover their own failed uploads");
+    await db.exec(`insert into public.rxm_datasets(id,name,hash,from_date,to_date,imported_at,payload) values('${failed}','Retry','retry','2026-08-01','2026-08-10',now(),'{}');insert into public.rxm_fact_chunks(dataset_id,month,generic,payload) values('${failed}','2026-08','KETOTIFEN','[{"count":1}]')`);
+    await db.query(`select public.rxm_finish_import('${failed}')`);
+    assert.equal((await db.query<{ complete: boolean }>(`select complete from public.rxm_datasets where id='${failed}'`)).rows[0].complete,true,"Editors can still complete imports");
+    await identity(owner,"owner@example.com");
+    await db.exec(`update public.rxm_workspace_defaults set payload='{"subject":"Team default","opening":"Text","body":"Text"}' where id='email';delete from public.rxm_datasets where id='${first}';delete from public.rxm_datasets where id='${failed}'`);
+    assert.equal((await db.query(`select * from public.rxm_batches`)).rows.length,1,"Source deletion preserves frozen history");
+    assert.equal((await db.query(`select * from public.rxm_fact_chunks where dataset_id='${first}'`)).rows.length,0,"Deleting metadata removes its chunks");
     await identity(member, "team@example.com");
+    assert.equal((await db.query<{ payload: { subject: string } }>("select payload from public.rxm_workspace_defaults")).rows[0].payload.subject,"Team default");
+    await assert.rejects(db.query(`select public.rxm_export_hierarchy('${hierarchy}')`),/Admin access required/);
+    assert.equal((await db.query(`delete from public.rxm_datasets where id='${second}' returning id`)).rows.length,0);
     assert.equal(
       (await db.query("select * from public.rxm_user_templates")).rows.length,
       0,
@@ -81,7 +110,7 @@ test("Postgres schema enforces verified team membership, private settings and ov
     );
     assert.equal(
       (await db.query("select * from public.rxm_datasets")).rows.length,
-      2,
+      1,
     );
     await assert.rejects(
       db.exec(
