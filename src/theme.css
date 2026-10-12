@@ -124,9 +124,10 @@ input::placeholder, textarea::placeholder { color: #6f8194; }
 .review-table { width: 100%; border-collapse: collapse; font-size: 12px; border: 1px solid var(--border); }
 .review-table th { background: var(--rx-navy); color: white; font-size: 11px; font-weight: 500; }
 .review-table th, .review-table td { padding: 14px 8px; text-align: center; vertical-align: middle; }
-.review-table td { border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.review-table td { border-bottom: 1px solid var(--border); overflow-wrap: anywhere; color: #16324f; }
 .review-table td svg { vertical-align: middle; margin-right: 3px; }
 .review-table .below-national { background: var(--rx-red-surface); color: var(--rx-red); }
+.review-table .below-national td { color: var(--rx-red); }
 .review-content > .button { margin-top: 18px; }
 .notice { font-size: 12px; color: var(--rx-blue); background: var(--rx-blue-surface); border-color: var(--border); }
 .notice.sample { color: var(--rx-amber); background: var(--rx-amber-surface); }
