@@ -83,6 +83,13 @@ export interface DoctorRow {
   ownCount: number;
   otherBrands: Record<string, number>;
 }
+export interface NationalRxShare {
+  total: number;
+  own: number;
+  share: number | null;
+  available: boolean;
+  reason?: string;
+}
 export interface RegionReport {
   structure: Structure;
   region: string;
@@ -92,6 +99,7 @@ export interface RegionReport {
   shares: { brand: string; count: number; share: number; own: boolean }[];
   otherCount: number;
   otherShare: number;
+  national?: NationalRxShare;
 }
 export interface Mail {
   id: string;
@@ -105,6 +113,7 @@ export interface Mail {
   rxCount: number;
   status: "Prepared" | "Opened" | "Failed";
   error?: string;
+  national?: NationalRxShare;
 }
 export interface Batch {
   id: string;
@@ -118,6 +127,7 @@ export interface Batch {
   settings: Settings;
   profile: BrandProfile;
   mails: Mail[];
+  national?: NationalRxShare;
 }
 export interface Workspace {
   datasets: Dataset[];
@@ -133,9 +143,8 @@ export const defaultSettings: Settings = {
   email: "",
   address: "",
   personalCc: [],
-  intro:
-    "Please find the regional Rx share scenario and prescriber list below for your review and follow-up.",
-  closing: "Best regards,",
+  intro: "",
+  closing: "Regards,",
 };
 export const starterProfiles: BrandProfile[] = [
   {

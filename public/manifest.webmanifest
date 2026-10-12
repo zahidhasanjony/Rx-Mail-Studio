@@ -3,8 +3,8 @@
   "short_name": "Rx Mail",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f7f8fa",
-  "theme_color": "#104e45",
+  "background_color": "#f3f6fc",
+  "theme_color": "#12314b",
   "icons": [
     {
       "src": "/icon-192.png",

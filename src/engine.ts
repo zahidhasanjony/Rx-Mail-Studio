@@ -5,6 +5,7 @@ import type {
   Hierarchy,
   HierarchyRow,
   Mail,
+  NationalRxShare,
   RegionReport,
   Settings,
   Structure,
@@ -45,6 +46,54 @@ export function overlaps(
 ) {
   return a.from <= b.to && b.from <= a.to;
 }
+export function dateInPeriod(date: string, month: string, period = "all") {
+  const day = Number(date.slice(8, 10));
+  return date.startsWith(month) && day >= 1 && day <= 31 &&
+    (period === "all" || (period === "first" && day <= 10) ||
+      (period === "second" && day >= 11 && day <= 20) ||
+      (period === "third" && day >= 21));
+}
+export function nationalRxShare(
+  datasets: Dataset[], month: string, profile: BrandProfile, period = "all",
+  expectedRegions: Pick<HierarchyRow, "structure" | "region" | "active">[] = [],
+): NationalRxShare {
+  const sources = eligibleDatasets(datasets, month).filter(d => !d.includedGenerics ||
+    d.includedGenerics.some(g => [profile.generic, ...(profile.aliases || [])].map(normalize).includes(normalize(g))));
+  const generics = new Set([profile.generic, ...(profile.aliases || [])].map(normalize));
+  const forms = new Set(profile.forms.map(normalize));
+  let total = 0, own = 0;
+  const covered = new Set<string>();
+  const routeKey = (s: Structure, r: string) => JSON.stringify([s, normalize(r)]);
+  for (const ds of sources) {
+    for (const s of ["ACD", "CCD"] as Structure[]) {
+      for (const region of ds.regions?.[s] || []) {
+        const dates = ds.regionDates?.[s]?.[region] || ds.dates;
+        if (dates ? dates.some(date => dateInPeriod(date, month, period)) :
+          coverage([ds], month).some(date => dateInPeriod(date, month, period))) covered.add(routeKey(s, region));
+      }
+    }
+    for (const f of ds.facts) {
+      if (!dateInPeriod(f.date, month, period)) continue;
+      if (f.acdRegion) covered.add(routeKey("ACD", f.acdRegion));
+      if (f.ccdRegion) covered.add(routeKey("CCD", f.ccdRegion));
+      if (!generics.has(normalize(f.generic)) || (forms.size && !forms.has(normalize(f.form)))) continue;
+      total += f.count;
+      if (normalize(f.brand) === normalize(profile.brand)) own += f.count;
+    }
+  }
+  const missing = expectedRegions.filter(r => r.active && !covered.has(routeKey(r.structure, r.region)));
+  // Overlapping active versions cannot establish a reliable national denominator.
+  const overlap = sources.some((a, i) => sources.slice(i + 1).some(b =>
+    coverage([a], month).some(date => dateInPeriod(date, month, period) && coverage([b], month).includes(date))));
+  const reason = overlap ? "Active source dates overlap. Select one version." :
+    missing.length ? `${missing.length} regional routes have no source coverage.` :
+      !total ? "No Rx records for this market and period." : undefined;
+  return { total, own, share: reason ? null : own / total * 100, available: !reason, ...(reason ? { reason } : {}) };
+}
+export function belowNational(doctor: Pick<DoctorRow, "genericCount" | "ownCount">, national?: NationalRxShare) {
+  return !!national?.available && national.total > 0 && doctor.genericCount > 0 &&
+    doctor.ownCount * national.total < national.own * doctor.genericCount;
+}
 export function reports(
   datasets: Dataset[],
   month: string,
@@ -65,6 +114,7 @@ export function reports(
       normalize,
     ),
     forms = profile.forms.map(normalize);
+  const national = nationalRxShare(datasets, month, profile, period);
   for (const ds of eligibleDatasets(datasets, month))
     for (const f of ds.facts) {
       const day = Number(f.date.slice(8, 10));
@@ -139,6 +189,7 @@ export function reports(
         shares: brands,
         otherCount,
         otherShare: (otherCount / total) * 100,
+        national,
         doctors: [...r.doctors.values()].sort(
           (a, b) =>
             a.mpe.localeCompare(b.mpe, undefined, { numeric: true }) ||
@@ -259,35 +310,31 @@ export function emailHtml(
   month: string,
   contact: HierarchyRow,
   settings: Settings,
+  national: NationalRxShare | undefined = report.national,
 ) {
   const e = escapeHtml;
-  const cell =
-    "padding:9px;border:1px solid #d7dee5;text-align:left;vertical-align:top";
-  const head = (v: string) =>
-    `<th style="${cell};background:#edf3f1;color:#174d43">${e(v)}</th>`;
-  const shareRows = report.shares.length
-    ? report.shares
-    : [{ brand: profile.brand, count: 0, share: 0, own: true }];
-  const shares = shareRows
-    .map(
-      (b) =>
-        `<td style="${cell};${b.own ? "background:#e7f5eb;" : ""}"><b>${e(b.brand)}</b><br>${report.total ? b.share.toFixed(1) + "%" : "No Rx recorded"}<br><span style="color:#65716d">${b.count} Rx</span></td>`,
-    )
-    .join("");
-  return `<html><body style="font:14px Arial,sans-serif;color:#202d36"><p>Dear ${e(contact.salutation)},</p><p>${e(settings.intro)}</p><p><b>${e(profile.generic)} (Generic) · ${e(profile.brand)} (Beximco's Brand)</b><br>${e(report.structure)} / ${e(report.region)} · ${e(month)} · ${e(profile.forms.join(", ") || "All dosage forms")}</p><h3 style="color:#174d43">Regional Rx share</h3><table style="border-collapse:collapse;width:100%"><tr>${shares}${report.otherCount ? `<td style="${cell}"><b>Other brands</b><br>${report.otherShare.toFixed(1)}%<br>${report.otherCount} Rx</td>` : ""}</tr></table><p style="color:#65716d;font-size:12px">Share of all ${e(profile.generic)} recorded product occurrences in the selected market. Total: ${report.total} Rx.</p><h3 style="color:#174d43">Prescriber list</h3><table style="border-collapse:collapse;width:100%"><thead><tr>${["MPE", "Doctor / Institute", "Specialty", profile.generic, profile.brand, "Other brands"].map(head).join("")}</tr></thead><tbody>${
-    report.doctors
-      .map(
-        (d) =>
-          `<tr><td style="${cell}">${e(d.mpe)}</td><td style="${cell}"><b>${e(d.name)}</b><br><span style="font-size:11px;color:#65716d">${e(d.code)}</span></td><td style="${cell}">${e(d.specialty)}</td><td style="${cell}">${d.genericCount}</td><td style="${cell}">${d.ownCount}</td><td style="${cell}">${
-            Object.entries(d.otherBrands)
-              .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-              .map(([b, n]) => `${e(b)} (${n})`)
-              .join(", ") || "—"
-          }</td></tr>`,
-      )
-      .join("") ||
-    '<tr><td colspan="6" style="padding:14px;border:1px solid #d7dee5">No Rx records for this market in the selected period.</td></tr>'
-  }</tbody></table><p>${e(settings.closing)}<br><b>${e(settings.name)}</b><br>${e(settings.title)}<br>${e(settings.company)}<br>${e(settings.address)}<br>${e(settings.email)}</p></body></html>`;
+  const cell = "padding:10px 8px;border-bottom:1px solid #d7e3ee;text-align:center;vertical-align:middle;overflow-wrap:anywhere";
+  const head = (v: string, detail = false) => `<th${detail ? ' class="rx-detail"' : ''} style="${cell};background:#12314b;color:#fff;font-size:12px;font-weight:bold">${e(v)}</th>`;
+  const colors = [
+    ["#ddf7ef", "#007568"], ["#f1f6fd", "#224a8a"], ["#eee6fc", "#6339a7"],
+    ["#fff2cd", "#885a00"], ["#dff6fc", "#006b83"],
+  ];
+  const leaders = [{ brand: profile.brand, count: report.own, share: report.total ? report.own / report.total * 100 : 0, own: true },
+    ...report.shares.filter(b => !b.own).slice(0, 4)];
+  const shares = Array.from({ length: 5 }, (_, i) => {
+    const b = leaders[i];
+    return `<td style="${cell};width:20%;background:${colors[i][0]};color:${colors[i][1]};border-bottom:0"><b>${e(b?.brand || "—")}</b><br><span style="font-size:18px;font-weight:bold;line-height:1.8">${b && report.total ? b.share.toFixed(1) + "%" : "—"}</span></td>`;
+  }).join("");
+  const rows = report.doctors.map(d => {
+    const below = belowNational(d, national);
+    const flagStyle = below ? ";color:#b42335;font-weight:bold" : "";
+    const share = d.genericCount ? (d.ownCount / d.genericCount * 100).toFixed(1) + "%" : "N/A";
+    const other = d.genericCount - d.ownCount;
+    return `<tr${below ? ' data-below-national="true"' : ''} style="background:${below ? "#fff1f2" : "#fff"}"><td class="rx-detail" style="${cell}">${e(d.mpe)}</td><td title="${e(d.name)}" style="${cell}${flagStyle}">${e(d.code)}</td><td class="rx-detail" style="${cell}">${e(d.specialty)}</td><td style="${cell}">${d.genericCount}</td><td style="${cell}">${d.ownCount}</td><td style="${cell}${flagStyle}">${below ? "↓ " : ""}${share}</td><td class="rx-detail" style="${cell}">${other}</td></tr>`;
+  }).join("") || `<tr><td colspan="7" style="${cell};padding:20px">No Rx records for this market in the selected period.</td></tr>`;
+  const benchmark = national?.available && national.share !== null ? national.share.toFixed(1) + "%" : "N/A";
+  const signature = [settings.name, settings.title, settings.company, settings.address, settings.email].filter(s => s.trim()).map(e).join("<br>");
+  return `<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body.rx-compact .rx-detail{display:none}body.rx-compact .rx-share-value{font-size:14px}</style></head><body style="margin:0;padding:24px 16px;font:14px Arial,sans-serif;color:#16324f;background:#fff"><div style="max-width:1100px;margin:auto"><p style="margin:0 0 20px">Dear ${e(contact.salutation)},</p><p style="margin:0 0 8px;font-size:18px;font-weight:bold;color:#007568">${e(profile.generic)} · ${e(profile.brand)}</p><p style="margin:0 0 24px;color:#566b80;font-size:12px">${e(report.region)} · ${e(report.structure)} | ${e(month)} | ${e(profile.forms.join(" + ") || "All dosage forms")}</p><p style="font-weight:bold;margin:0 0 12px">Regional Rx share</p><table role="presentation" style="border-collapse:collapse;width:100%;table-layout:fixed"><tr>${shares}</tr></table><p style="font-size:11px;color:#566b80;margin:8px 0 18px">Share of all ${e(profile.generic)} Rx · Total ${report.total}</p><p style="padding:12px;text-align:center;background:${national?.available ? "#eee6fc" : "#f3f6fc"};color:${national?.available ? "#6339a7" : "#566b80"};font-weight:bold;margin:0 0 22px">National ${e(profile.brand)} share ${benchmark}</p><p style="font-weight:bold;margin:0 0 12px">Prescriber list</p><table aria-label="Prescriber list" style="border-collapse:collapse;width:100%;font-size:12px"><thead><tr>${["MPE", "Doctor code", "Specialty", "Generic Rx", profile.brand + " Rx", profile.brand + " share", "Other Rx"].map((h, i) => head(h, [0, 2, 6].includes(i))).join("")}</tr></thead><tbody>${rows}</tbody></table>${national?.available ? `<p style="font-size:11px;color:#b42335;margin:10px 0 20px">↓ Red = below national ${e(profile.brand)} share (${benchmark}).</p>` : '<p style="font-size:11px;color:#566b80;margin:10px 0 20px">National benchmark unavailable.</p>'}<p style="line-height:1.6;margin:0">${e(settings.closing || "Regards,")}<br>${signature}</p></div></body></html>`;
 }
 export function makeMail(
   report: RegionReport,
@@ -295,6 +342,7 @@ export function makeMail(
   month: string,
   hierarchy: Hierarchy | undefined,
   settings: Settings,
+  national: NationalRxShare | undefined = report.national,
 ): Mail {
   if (!settings.name.trim() || !emailValid(settings.email))
     throw new Error(
@@ -319,7 +367,8 @@ export function makeMail(
     to: { name: row.rseName, email: row.rseEmail },
     cc,
     subject: `${profile.generic} Prescriber List · ${report.structure} ${report.region} Region · ${month}`,
-    html: emailHtml(report, profile, month, row, settings),
+    html: emailHtml(report, profile, month, row, settings, national),
+    ...(national ? { national: { ...national } } : {}),
     doctorCount: report.doctors.length,
     rxCount: report.total,
     status: "Prepared",

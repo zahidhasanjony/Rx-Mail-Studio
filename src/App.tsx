@@ -59,6 +59,8 @@ import {
   overlaps,
   emailValid,
   normalize,
+  nationalRxShare,
+  belowNational,
 } from "./engine";
 import {
   cloudConfigured,
@@ -73,6 +75,7 @@ import type { Mode } from "./storage";
 import { usernameSignIn, currentAccount, AccountServiceError } from "./auth";
 import type { UserAccount } from "./auth";
 import UsersPage from "./UsersPage";
+import RegionReview from "./RegionReview";
 import { download, outlookPackage, mailEml, emlFilename, emlPackage, emlPackageFilename } from "./export";
 import { hierarchyColumns, mapHierarchy } from "./excel";
 import type { Sheet } from "./excel";
@@ -443,6 +446,9 @@ export default function App() {
     [structure, setStructure] = useState<"ACD" | "CCD" | "Both">("ACD"),
     [period, setPeriod] = useState("all"),
     [profileId, setProfileId] = useState("tofen"),
+    [dosageForm, setDosageForm] = useState("all"),
+    [reviewRegion, setReviewRegion] = useState(""),
+    [compactPreview, setCompactPreview] = useState(() => window.innerWidth <= 740),
     [search, setSearch] = useState(""),
     [selected, setSelected] = useState<Set<string>>(new Set()),
     [mobileNav, setMobileNav] = useState(false);
@@ -542,6 +548,10 @@ export default function App() {
   }, [page, mode, account?.role]);
   const profile =
     workspace.profiles.find((p) => p.id === profileId) || workspace.profiles[0];
+  const marketProfile = useMemo(() => profile ? {
+    ...profile, forms: dosageForm === "all" || !profile.forms.includes(dosageForm) ? profile.forms : [dosageForm],
+  } : undefined, [profile, dosageForm]);
+  useEffect(() => setDosageForm("all"), [profileId]);
   useEffect(() => {
     if (mode !== "cloud" || !profile) return;
     let alive = true;
@@ -593,17 +603,21 @@ export default function App() {
   );
   const reportList = useMemo(
     () =>
-      profile
+      marketProfile
         ? reports(
             workspace.datasets,
             month,
-            profile,
+            marketProfile,
             structure === "Both" ? ["ACD", "CCD"] : [structure],
             period,
           )
         : [],
-    [workspace.datasets, month, profile, structure, period],
+    [workspace.datasets, month, marketProfile, structure, period],
   );
+  const national = useMemo(() => marketProfile
+    ? nationalRxShare(workspace.datasets, month, marketProfile, period, currentHierarchy?.rows)
+    : { total: 0, own: 0, share: null, available: false, reason: "Choose a brand / generic." },
+    [workspace.datasets, month, marketProfile, period, currentHierarchy]);
   const queue = useMemo(
     () =>
       regionalQueue(
@@ -661,6 +675,14 @@ export default function App() {
       .toLowerCase()
       .includes(search.toLowerCase()),
   );
+  const review = queue.find(q => key(q.report) === reviewRegion) || validQueue[0] || queue[0];
+  const previewRegional = (report: RegionReport) => {
+    if (!marketProfile) return;
+    try {
+      const m = makeMail(report, marketProfile, month + " · " + periodText, currentHierarchy, workspace.settings, national);
+      setPreview({ html: m.html, title: m.subject, mail: m, sender: { name: workspace.settings.name, email: workspace.settings.email } });
+    } catch (e) { notify((e as Error).message, true); }
+  };
   async function update(next: Workspace) {
     initialChoice.current = true;
     setBusy(true);
@@ -943,7 +965,7 @@ export default function App() {
     }
   }
   async function generate() {
-    if (!profile) return;
+    if (!marketProfile) return;
     const chosen = validQueue.filter((q) => selected.has(key(q.report)));
     if (!chosen.length) {
       notify("Select at least one region with a valid recipient.", true);
@@ -953,10 +975,11 @@ export default function App() {
       const mails = chosen.map((q) =>
         makeMail(
           q.report,
-          profile,
+          marketProfile,
           month + " · " + periodText,
           currentHierarchy,
           workspace.settings,
+          national,
         ),
       );
       const batch: Batch = {
@@ -969,7 +992,8 @@ export default function App() {
         sourceIds: activeSources.map((d) => d.id),
         hierarchyId: currentHierarchy!.id,
         settings: structuredClone(workspace.settings),
-        profile: structuredClone(profile),
+        profile: structuredClone(marketProfile),
+        national: structuredClone(national),
         mails,
       };
       if (
@@ -1343,71 +1367,8 @@ export default function App() {
           </div>
           {page === "generate" && (
             <>
-              <section className="hero">
-                <div className="hero-copy">
-                  <div className="hero-kicker">
-                    <span />
-                    YOUR NEXT REGIONAL UPDATE
-                  </div>
-                  <h2>
-                    One batch.
-                    <br />
-                    <span>Every region, ready.</span>
-                  </h2>
-                  <p>
-                    Select your market and reporting period.
-                    <br className="desktop-only" /> We’ll assemble the shares,
-                    prescribers and recipients.
-                  </p>
-                  <div className="hero-links">
-                    <button onClick={() => setPage("sources")}>
-                      <UploadCloud size={15} />
-                      Import MRW data
-                      <ArrowUpRight size={14} />
-                    </button>
-                    <button onClick={() => setPage("hierarchy")}>
-                      <Network size={15} />
-                      Manage hierarchy
-                      <ArrowUpRight size={14} />
-                    </button>
-                  </div>
-                </div>
-                <div className="hero-art" aria-hidden="true">
-                  <div className="art-ring one" />
-                  <div className="art-ring two" />
-                  <div className="art-card back">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                  <div className="art-card front">
-                    <div className="art-envelope">
-                      <Mail size={39} />
-                      <span>
-                        <Check size={14} />
-                      </span>
-                    </div>
-                    <strong>Regional update</strong>
-                    <small>Rx share + prescriber list</small>
-                    <div className="art-bars">
-                      <i />
-                      <i />
-                      <i />
-                      <i />
-                      <i />
-                    </div>
-                    <div className="art-ready">
-                      <CheckCircle2 size={14} />
-                      Ready for your review
-                    </div>
-                  </div>
-                  <span className="art-chip">
-                    <Users size={14} />
-                    {queue.length || "Your"} regions
-                  </span>
-                </div>
-              </section>
               <section className="filter-card">
+                <h2 className="filter-title">Report selection</h2>
                 <div className="filters">
                   <Field label="Reporting month">
                     <div className="input-icon">
@@ -1452,6 +1413,12 @@ export default function App() {
                       <option value="third">21–month end</option>
                     </select>
                   </Field>
+                  <Field label="Dosage form">
+                    <select value={dosageForm} onChange={e => setDosageForm(e.target.value)} aria-label="Dosage form">
+                      <option value="all">{profile?.forms.join(" + ") || "All forms"}</option>
+                      {profile?.forms.map(form => <option key={form} value={form}>{form}</option>)}
+                    </select>
+                  </Field>
                 </div>
                 <div className="filter-footer">
                   <span>
@@ -1464,7 +1431,7 @@ export default function App() {
                   </span>
                   <span className="market-tag">
                     <FlaskConical size={13} />
-                    {profile?.forms.join(" + ") || "All forms"}
+                    {marketProfile?.forms.join(" + ") || "All forms"}
                     <button
                       onClick={() => profile && setBrandEdit({ ...profile })}
                     >
@@ -1474,49 +1441,12 @@ export default function App() {
                 </div>
               </section>
               <div className="stats">
-                <div className="stat">
-                  <div className="stat-icon">
-                    <Network size={19} />
-                  </div>
-                  <div>
-                    <span>Regions with Rx</span>
-                    <strong>{num(reportList.length)}</strong>
-                  </div>
-                  <small>
-                    {structure === "Both" ? "ACD + CCD" : structure}
-                  </small>
-                </div>
-                <div className="stat">
-                  <div className="stat-icon">
-                    <Users size={19} />
-                  </div>
-                  <div>
-                    <span>Prescriber entries</span>
-                    <strong>
-                      {num(
-                        reportList.reduce((a, r) => a + r.doctors.length, 0),
-                      )}
-                    </strong>
-                  </div>
-                  <small>Doctor codes</small>
-                </div>
-                <div className="stat">
-                  <div className="stat-icon">
-                    <Mail size={19} />
-                  </div>
-                  <div>
-                    <span>Ready to generate</span>
-                    <strong>{num(validQueue.length)}</strong>
-                  </div>
-                  <small
-                    className={blocked.length ? "amber-text" : "green-text"}
-                  >
-                    {blocked.length
-                      ? `${blocked.length} need attention`
-                      : "Recipient checks"}
-                  </small>
-                </div>
+                <div className="stat stat-teal"><div className="stat-icon"><Mail size={21} /></div><div><span>Emails ready</span><strong>{num(validQueue.length)}</strong><small>{structure === "Both" ? "ACD + CCD" : structure}</small></div></div>
+                <div className="stat stat-blue"><div className="stat-icon"><FlaskConical size={21} /></div><div><span>National {profile?.brand} share</span><strong>{!loading && national.available && national.share !== null ? national.share.toFixed(1) + "%" : "N/A"}</strong><small>Same market and period</small></div></div>
+                <div className="stat stat-violet"><div className="stat-icon"><Users size={21} /></div><div><span>Doctor review</span><strong>{national.available ? num(reportList.reduce((n, r) => n + r.doctors.filter(d => belowNational(d, national)).length, 0)) : "—"}</strong><small>Entries below national</small></div></div>
               </div>
+              {!loading && activeSources.length > 0 && !national.available && <div className="notice benchmark-notice"><AlertCircle size={17} /><span>National benchmark unavailable. {national.reason} Doctor rows will remain unmarked.</span></div>}
+              <div className="generation-layout">
               <section className="card queue-card">
                 <div className="card-header">
                   <div>
@@ -1590,7 +1520,7 @@ export default function App() {
                       </thead>
                       <tbody>
                         {filteredQueue.map((q) => (
-                          <tr key={key(q.report)}>
+                          <tr key={key(q.report)} className={review && key(review.report) === key(q.report) ? "review-selected" : ""}>
                             <td className="check-cell">
                               <input
                                 type="checkbox"
@@ -1612,9 +1542,8 @@ export default function App() {
                                   {q.report.region}
                                 </span>
                                 <div>
-                                  <strong>
-                                    {q.row?.rseName || "RSE not assigned"}
-                                  </strong>
+                                  <button className="region-select" onClick={() => setReviewRegion(key(q.report))} aria-label={`Review region ${q.report.region}`}>{q.report.region}</button>
+                                  <small>{q.row?.rseName || "RSE not assigned"}</small>
                                   <small>
                                     {q.report.structure} ·{" "}
                                     {q.row?.rseEmail ||
@@ -1667,25 +1596,7 @@ export default function App() {
                                 className="icon-button"
                                 disabled={!!q.error}
                                 aria-label={`Preview ${q.report.region} email`}
-                                onClick={() => {
-                                  try {
-                                    const m = makeMail(
-                                      q.report,
-                                      profile,
-                                      month + " · " + periodText,
-                                      currentHierarchy,
-                                      workspace.settings,
-                                    );
-                                    setPreview({
-                                      html: m.html,
-                                      title: m.subject,
-                                      mail: m,
-                                      sender: { name: workspace.settings.name, email: workspace.settings.email },
-                                    });
-                                  } catch (e) {
-                                    notify((e as Error).message, true);
-                                  }
-                                }}
+                                onClick={() => previewRegional(q.report)}
                               >
                                 <Eye size={18} />
                               </button>
@@ -1731,6 +1642,8 @@ export default function App() {
                   </Button>
                 </div>
               </section>
+              <RegionReview report={review?.report} brand={profile?.brand || ""} recipient={review?.row?.rseName} national={national} blocked={review?.error} onPreview={() => review && previewRegional(review.report)} />
+              </div>
               <div className="help-line">
                 <span>
                   <Monitor size={15} />
@@ -1752,6 +1665,7 @@ export default function App() {
           )}
           {page === "sources" && (
             <>
+              <div className="upload-grid">
               <section
                 className="upload-card"
                 onDragOver={(e) => e.preventDefault()}
@@ -1767,7 +1681,7 @@ export default function App() {
                 <p>
                   Drop an Excel file here, or choose one from your device.
                   <br />
-                  Large files are processed in a background worker.
+                  Review the detected columns before importing.
                 </p>
                 <Button
                   variant="secondary"
@@ -1782,6 +1696,10 @@ export default function App() {
                   supported
                 </small>
               </section>
+              <section className="upload-card hierarchy-upload" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); void selectFile(e.dataTransfer.files[0], "hierarchy"); }}>
+                <div className="upload-symbol"><Network size={31} /></div><h2>Quarterly hierarchy</h2><p>Upload the latest regional recipients.<br />Review RSE and PSL routing, then set the effective date.</p><Button variant="secondary" disabled={busy} onClick={() => hierarchyInput.current?.click()}>Choose hierarchy file <ArrowRight size={16} /></Button><small>Excel or CSV · Versioned by effective date</small>
+              </section>
+              </div>
               <section className="card">
                 <div className="card-header">
                   <div>
@@ -2614,12 +2532,13 @@ export default function App() {
         </div>
       )}
       {preview && (
-        <Modal title={preview.title} wide onClose={() => setPreview(null)}>
+        <Modal title={preview.mail ? "Email preview" : preview.title} wide onClose={() => setPreview(null)}>
+          {preview.mail && <div className="preview-envelope"><div><strong>To {preview.mail.to.name}</strong><span>{preview.mail.to.email}</span><small>CC {preview.mail.cc.map(c => c.name || c.email).join(" · ") || "None"}</small></div><div className="preview-view" role="group" aria-label="Email table view"><button aria-pressed={compactPreview} className={compactPreview ? "active" : ""} onClick={() => setCompactPreview(true)}>Compact</button><button aria-pressed={!compactPreview} className={!compactPreview ? "active" : ""} onClick={() => setCompactPreview(false)}>Full table</button></div></div>}
           <iframe
             className="email-preview"
             title="Email preview"
             sandbox=""
-            srcDoc={preview.html}
+            srcDoc={compactPreview && preview.mail ? preview.html.replace(/<body(?=[ >])/, '<body class="rx-compact"') : preview.html}
           />
           <div className="modal-footer">
             {preview.mail && preview.sender && (
