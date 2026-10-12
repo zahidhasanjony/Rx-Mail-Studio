@@ -2459,3 +2459,18 @@ textarea {
 
 .hierarchy-contact-edit { grid-template-columns: 0.7fr 1fr 1.3fr auto; }
 @media (max-width: 740px) { .hierarchy-contact-edit { grid-template-columns: 1fr auto; } .hierarchy-contact-edit input { grid-column: 1; grid-row: auto; } .hierarchy-contact-edit .icon-button { grid-column: 2; grid-row: 1; } }
+
+.account-identity { display:flex; flex-direction:column; gap:2px; font-size:12px; font-weight:700; white-space:nowrap; }
+.account-identity small { font-size:10px; font-weight:500; color:#007568; }
+.top-account-action { padding:8px 10px; min-height:36px; white-space:nowrap; }
+.admin-shortcuts { display:grid; gap:12px; }
+.admin-shortcuts .button { justify-content:flex-start; padding:16px; text-align:left; }
+.admin-shortcuts .button span { flex:1; display:flex; flex-direction:column; gap:5px; }
+.admin-shortcuts small { font-size:11px; font-weight:400; color:#566b80; }
+@media(max-width:740px) {
+  .topbar { height:auto; min-height:66px; flex-wrap:wrap; gap:8px; padding-top:12px; padding-bottom:12px; }
+  .top-actions { flex-wrap:wrap; gap:6px; justify-content:flex-end; margin-left:auto; }
+  .top-account-action { font-size:10px; padding:7px 9px; }
+  .account-identity { font-size:10px; }
+  .account-identity small { color:#b9f2df; font-size:9px; }
+}

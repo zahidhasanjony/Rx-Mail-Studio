@@ -472,6 +472,7 @@ export default function App() {
     } | null>(null),
     [batchModal, setBatchModal] = useState<Batch | null>(null),
     [login, setLogin] = useState(false),
+    [adminPanel, setAdminPanel] = useState(false),
     [userEmail, setUserEmail] = useState(""),
     [username, setUsername] = useState(""),
     [password, setPassword] = useState(""),
@@ -558,10 +559,39 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
   useEffect(() => {
-    if (!userEmail) { setAccount(null); return; }
     let alive = true;
-    currentAccount().then((value) => { if (alive) setAccount(value); })
-      .catch(() => { if (alive) setAccount(null); });
+    if (!userEmail) {
+      setAccount(null);
+      setAdminPanel(false);
+      if (mode === "cloud") {
+        setWorkspace(emptyWorkspace()); setMode("local");
+        setPreview(null); setBatchModal(null);
+      }
+      return;
+    }
+    // Restore a saved login outside the Supabase auth callback to avoid its session lock.
+    const restoreCloud = !initialChoice.current;
+    if (restoreCloud) { initialChoice.current = true; setLoading(true); }
+    currentAccount().then(async value => {
+      if (!alive) return;
+      setAccount(value);
+      if (restoreCloud) {
+        const saved = await cloudLoad();
+        if (!alive) return;
+        workspaceRef.current = saved; setWorkspace(saved); setMode("cloud");
+        const last = saved.datasets.filter(d => d.active).sort((a, b) => b.to.localeCompare(a.to))[0];
+        if (last) { setMonth(last.to.slice(0, 7)); setEndMonth(last.to.slice(0, 7)); }
+      }
+    }).catch(async e => {
+      if (!alive) return;
+      setAccount(null);
+      notify((e as Error).message, true);
+      if (restoreCloud) setLoading(false);
+      if (e instanceof AccountServiceError && [401, 403].includes(e.status)) {
+        setWorkspace(emptyWorkspace()); setMode("local"); setLogin(true); setPassword("");
+        await supabase?.auth.signOut({ scope: "local" });
+      }
+    }).finally(() => { if (alive && restoreCloud) setLoading(false); });
     return () => { alive = false; };
   }, [userEmail]);
   useEffect(() => {
@@ -1114,6 +1144,7 @@ export default function App() {
       );
       return;
     }
+    initialChoice.current = true;
     setBusy(true);
     setBusyText("Connecting to Supabase");
     try {
@@ -1121,8 +1152,11 @@ export default function App() {
       setAccount(signedIn);
       setPassword("");
       const w = await cloudLoad();
+      workspaceRef.current = w;
       setWorkspace(w);
       setMode("cloud");
+      const last = w.datasets.filter(d => d.active).sort((a, b) => b.to.localeCompare(a.to))[0];
+      if (last) { setMonth(last.to.slice(0, 7)); setEndMonth(last.to.slice(0, 7)); }
       setLogin(false);
       notify("Connected to your SBM cloud workspace");
     } catch (e) {
@@ -1158,6 +1192,24 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  }
+  async function signOutAccount() {
+    setBusy(true); setBusyText("Signing out");
+    try {
+      const result = await supabase?.auth.signOut({ scope: "local" });
+      if (result?.error) throw result.error;
+      setAccount(null); setUserEmail(""); setAdminPanel(false);
+      setPassword(""); setUsername(""); setLogin(false);
+      setPreview(null); setBatchModal(null); setDeleteSource(null);
+      setHierarchyMap(null); setPendingHierarchy(null); setEditingRow(null);
+      workspaceRef.current = emptyWorkspace(); setWorkspace(emptyWorkspace()); setMode("local");
+      await switchLocal();
+      notify("Signed out");
+    } catch (e) { notify((e as Error).message, true); }
+    finally { setBusy(false); }
+  }
+  function openAdminPage(target: Page) {
+    setAdminPanel(false); setMobileNav(false); setPage(target);
   }
   async function importResults(file: File | undefined) {
     if (!file) return;
@@ -1263,9 +1315,9 @@ export default function App() {
             <span className="avatar">{account?.username.slice(0, 2) || "SB"}</span>
             <span>
               <strong>
-                {workspace.settings.name || "Set up your profile"}
+                {workspace.settings.name || account?.name || account?.username || "Set up your profile"}
               </strong>
-              <small>SBM · Beximco</small>
+              <small>{account ? `${account.username} · ${account.role === "owner" ? "Admin" : account.role === "editor" ? "Editor" : "Member"}` : "SBM · Beximco"}</small>
             </span>
             <MoreHorizontal size={18} />
           </button>
@@ -1300,7 +1352,10 @@ export default function App() {
               </span>
               <span className="status-dot" />
             </button>
-            <span className="avatar small">{account?.username.slice(0, 2) || "SB"}</span>
+            {account && <span className="account-identity">{account.username}<small>{account.role === "owner" ? "Admin" : account.role === "editor" ? "Editor" : "Member"}</small></span>}
+            {isAdmin && <Button className="top-account-action admin-control-button" variant="secondary" onClick={() => setAdminPanel(true)}><ShieldCheck size={15} />Admin controls</Button>}
+            {userEmail ? <Button className="top-account-action" variant="text" disabled={busy} onClick={signOutAccount}><LogOut size={15} />Sign out</Button> :
+              <Button className="top-account-action" variant="secondary" disabled={busy} onClick={() => { initialChoice.current = true; setLogin(true); }}><Users size={15} />Sign in</Button>}
           </div>
         </header>
         <main>
@@ -1317,6 +1372,7 @@ export default function App() {
               </button>
             </div>
           )}
+          {userEmail && mode !== "cloud" && <div className="notice"><Cloud size={17} /><span>{account?.username || "Your account"} is signed in. Open the cloud workspace to access shared data{account?.role === "owner" ? " and admin controls" : ""}.</span><button onClick={openCloud} disabled={busy || loading}>Open cloud workspace<ArrowRight size={14} /></button></div>}
           {mode === "local" && !loading && !workspace.datasets.length && (
             <div className="notice welcome">
               <span>
@@ -2424,18 +2480,7 @@ export default function App() {
                       ? "Refresh cloud workspace"
                       : "Connect to cloud"}
                   </Button>
-                  {mode === "cloud" && (
-                    <Button
-                      variant="text"
-                      onClick={async () => {
-                        await supabase?.auth.signOut();
-                        await switchLocal();
-                      }}
-                    >
-                      <LogOut size={15} />
-                      Sign out
-                    </Button>
-                  )}
+                  {userEmail && <p className="tiny">Use Sign out at the top of any page to leave your account.</p>}
                   <p className="tiny">
                     Device data is saved in this browser. It is not
                     automatically uploaded when you sign in.
@@ -3392,6 +3437,18 @@ export default function App() {
           </div>
         </Modal>
       )}
+      {adminPanel && isAdmin && <Modal title="Admin controls" onClose={() => setAdminPanel(false)}>
+        <div className="modal-body">
+          <p className="muted">Signed in as {account.username} · Admin</p>
+          <div className="admin-shortcuts">
+            <Button variant="secondary" onClick={() => openAdminPage("users")}><Users size={18} /><span><strong>Manage users</strong><small>Create accounts and manage access.</small></span><ArrowRight size={16} /></Button>
+            <Button variant="secondary" onClick={() => openAdminPage("settings")}><SettingsIcon size={18} /><span><strong>Team email defaults</strong><small>Publish default subject and mail wording.</small></span><ArrowRight size={16} /></Button>
+            <Button variant="secondary" onClick={() => openAdminPage("sources")}><FileSpreadsheet size={18} /><span><strong>Manage source imports</strong><small>Upload sources or delete an import.</small></span><ArrowRight size={16} /></Button>
+            <Button variant="secondary" onClick={() => openAdminPage("hierarchy")}><Network size={18} /><span><strong>Manage hierarchy</strong><small>Download, upload or revise recipients.</small></span><ArrowRight size={16} /></Button>
+          </div>
+        </div>
+        <div className="modal-footer"><Button variant="secondary" onClick={() => setAdminPanel(false)}>Done</Button></div>
+      </Modal>}
       {login && (
         <Modal
           title="Connect your SBM workspace"

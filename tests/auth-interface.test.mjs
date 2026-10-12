@@ -10,7 +10,7 @@ import { defaultEmailTemplate } from "../src/types.ts";
 import { JSDOM } from "jsdom";
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 
-test("compiled username login opens admin user creation; members cannot see user management", async () => {
+test("compiled login restores cloud sessions, exposes admin shortcuts and signs out from every page", async () => {
   const output = await mkdtemp(join(tmpdir(), "rxm-auth-ui-"));
   try {
     await build({ logLevel: "silent", define: {
@@ -20,10 +20,11 @@ test("compiled username login opens admin user creation; members cannot see user
     const html = await readFile(join(output, "index.html"), "utf8");
     const script = html.match(/src="(\/assets\/index-[^"]+\.js)"/)[1];
     const code = await readFile(join(output, script), "utf8");
-    for (const role of ["owner", "editor", "member", "stale"]) {
+    for (const scenario of ["owner", "editor", "member", "restored-owner", "restored-member", "stale"]) {
+      const role = scenario.startsWith("restored-") ? scenario.slice(9) : scenario;
       const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "https://rxmail.vercel.app/", runScripts: "outside-only", pretendToBeVisual: true });
       const w = dom.window, calls = [], errors = [];
-      const account = { id: "11111111-1111-4111-8111-111111111111", username: "ADMIN", name: "Test admin", role: role === "stale" ? "member" : role, active: true, createdAt: "2026-01-01" };
+      const account = { id: "11111111-1111-4111-8111-111111111111", username: role === "owner" ? "ZHD" : "TEAM", name: "Test account", role: role === "stale" ? "member" : role, active: true, createdAt: "2026-01-01" };
       const jwt = [Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url"), Buffer.from(JSON.stringify({ sub: account.id, email: "owner@example.com", exp: Math.floor(Date.now()/1000)+3600, role: "authenticated" })).toString("base64url"), Buffer.alloc(32, 1).toString("base64url")].join(".");
       const accounts = [account];
       const sample = demoWorkspace();
@@ -31,7 +32,7 @@ test("compiled username login opens admin user creation; members cannot see user
       const requests = [];
       let sharedTemplate = { ...defaultEmailTemplate };
 
-      if (role === "stale") w.localStorage.setItem("sb-rx-project-auth-token", JSON.stringify({ access_token: jwt, refresh_token: "old-refresh", token_type: "bearer", expires_at: Math.floor(Date.now()/1000)+3600, expires_in: 3600, user: { id: account.id, email: "owner@example.com" } }));
+      if (role === "stale" || scenario.startsWith("restored-")) w.localStorage.setItem("sb-rx-project-auth-token", JSON.stringify({ access_token: jwt, refresh_token: "old-refresh", token_type: "bearer", expires_at: Math.floor(Date.now()/1000)+3600, expires_in: 3600, user: { id: account.id, email: "owner@example.com" } }));
       Object.defineProperty(w, "crypto", { value: webcrypto }); Object.defineProperty(w, "indexedDB", { value: indexedDB }); Object.defineProperty(w, "IDBKeyRange", { value: IDBKeyRange });
       Object.assign(w, { structuredClone, TextEncoder, TextDecoder, Blob, Headers, Request, Response, AbortSignal });
       w.addEventListener("error", (e) => errors.push(e.message));
@@ -71,18 +72,38 @@ test("compiled username login opens admin user creation; members cannot see user
       const fill = (input, value) => { Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, "value").set.call(input, value); input.dispatchEvent(new w.Event("input", { bubbles: true })); };
       try {
         w.eval(code.replaceAll("import.meta.url", '"https://rxmail.vercel.app/"'));
-        await waitFor(() => button("Settings")); button("Settings").click();
-        await waitFor(() => button("Connect to cloud")); button("Connect to cloud").click();
-        await waitFor(() => w.document.querySelector('[aria-label="Username"]'));
+        await waitFor(() => button("Settings"));
         if (role === "stale") {
+          await waitFor(() => w.document.querySelector('[aria-label="Username"]'));
           assert.ok(calls.some((c) => c.action === "me"));
-          assert.equal(w.localStorage.getItem("sb-rx-project-auth-token"), null, "Clear stale sessions so the user can sign in again");
+          await waitFor(() => w.localStorage.getItem("sb-rx-project-auth-token") === null);
+          assert.ok(button("Sign in")); assert.ok(!button("Admin controls"));
           assert.deepEqual(errors, []); continue;
         }
-        fill(w.document.querySelector('[aria-label="Username"]'), "ADMIN"); fill(w.document.querySelector('[aria-label="Password"]'), "abcd");
-        w.document.querySelector('.modal form').dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
-        await waitFor(() => button("Cloud connected"));
-        assert.deepEqual(calls.find((c) => c.action === "login"), { action: "login", username: "ADMIN", password: "abcd" });
+        if (!scenario.startsWith("restored-")) {
+          button("Sign in").click();
+          await waitFor(() => w.document.querySelector('[aria-label="Username"]'));
+          fill(w.document.querySelector('[aria-label="Username"]'), account.username); fill(w.document.querySelector('[aria-label="Password"]'), "abcd");
+          w.document.querySelector('.modal form').dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
+          await waitFor(() => button("Cloud connected"));
+          assert.deepEqual(calls.find((c) => c.action === "login"), { action: "login", username: account.username, password: "abcd" });
+        } else {
+          await waitFor(() => button("Cloud connected"));
+          assert.ok(!calls.some(c => c.action === "login"), "A saved verified session restores cloud mode without another login");
+        }
+        await waitFor(() => button("Sign out"));
+        assert.ok(w.document.querySelector(".topbar").textContent.includes(account.username));
+        assert.equal(!!button("Admin controls"), role === "owner");
+        if (role === "owner") {
+          button("Admin controls").click();
+          await waitFor(() => w.document.querySelector('[aria-label="Admin controls"]'));
+          assert.match(w.document.querySelector('.modal').textContent,/Manage users/);
+          assert.match(w.document.querySelector('.modal').textContent,/Manage hierarchy/);
+          const hierarchyShortcut = [...w.document.querySelectorAll('.admin-shortcuts button')].find(b => b.textContent.includes('Manage hierarchy'));
+          hierarchyShortcut.click();
+          await waitFor(() => button("Create version"));
+          assert.ok(!w.document.querySelector('[aria-label="Admin controls"]'));
+        }
         button("Settings").click();
         await waitFor(() => w.document.body.textContent.includes("Team default email wording"));
         if (role === "owner") {
@@ -135,6 +156,15 @@ test("compiled username login opens admin user creation; members cannot see user
         } else {
           assert.ok(!button("Users")); assert.ok(!button("Manage users"));
         }
+        [...w.document.querySelectorAll("aside nav button")].find(b => b.textContent.trim().startsWith("Generate emails")).click();
+        await waitFor(() => button("Sign out"));
+        button("Sign out").click();
+        await waitFor(() => button("Sign in") && !button("Cloud connected"));
+        assert.equal(w.localStorage.getItem("sb-rx-project-auth-token"), null);
+        assert.ok(!button("Admin controls")); assert.ok(!button("Users"));
+        button("Source files").click();
+        await waitFor(() => w.document.body.textContent.includes("No source files yet"));
+        assert.ok(!w.document.querySelector(".source-row"), "Signing out does not leave cloud imports visible in the device workspace");
         assert.deepEqual(errors, []);
       } finally { w.close(); }
     }
