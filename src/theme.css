@@ -257,3 +257,5 @@ input::placeholder, textarea::placeholder { color: #6f8194; }
   .email-preview { height: 55vh; min-height: 300px; }
   .toast { bottom: 82px; left: 16px; right: 16px; }
 }
+
+.signature-preview { padding:20px; margin:16px 0 24px; border:1px solid var(--border); border-radius:10px; background:white; overflow-wrap:anywhere; }

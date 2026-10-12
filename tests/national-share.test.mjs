@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { belowNational, nationalRxShare, reports, makeMail } from "../src/engine.ts";
+import { belowNational, nationalRxShare, reports, makeMail, emailHtml, emailSignature } from "../src/engine.ts";
 import { defaultSettings, starterProfiles } from "../src/types.ts";
 import { JSDOM } from "jsdom";
 const profile = starterProfiles[0];
@@ -69,6 +69,45 @@ test("clean email has five centered brand cells, doctor codes, exact red rows an
   assert.equal(table.querySelectorAll('tr[data-below-national="true"]').length, 2);
   assert.ok([...table.querySelectorAll("th,td")].every(c => c.getAttribute("style")?.includes("text-align:center;vertical-align:middle")));
   assert.deepEqual([...table.querySelectorAll('tr[data-below-national="true"]')].map(r => r.children[1].textContent), ["D1", "D4"]);
-  assert.match(mail.html, /National TOFEN share 32.0%/);
+  assert.equal(doc.querySelector('[data-national-comparison]').textContent,
+    "The National Rx share of TOFEN (Beximco’s Brand) is 32.0% whereas yours is 27.9%.");
+  assert.equal(doc.querySelector('[data-national-comparison]').nextElementSibling.tagName, "TABLE");
   assert.ok(mail.html.indexOf("Regional Rx share") < mail.html.indexOf("Prescriber list"));
+});
+test("Other Brand restores all competitor names and counts; regional comparison uses exact percentages", () => {
+  const r = reports([source([fact("TOFEN", 32), fact("Fenat", 1), fact("Toti", 2), fact("Other", 65)])], "2026-08", profile, ["ACD"])[0];
+  const n = { total: 10000, own: 3201, share: 32.01, available: true };
+  const render = (report = r, benchmark = n) => new JSDOM(emailHtml(report, profile, "2026-08 · All available dates", hierarchy.rows[0], settings, benchmark)).window.document;
+  let doc = render();
+  assert.equal(doc.querySelector('table[aria-label="Prescriber list"] tbody tr').lastElementChild.textContent, "OTHER (65), TOTI (2), FENAT (1)");
+  assert.equal(doc.querySelector('table[aria-label="Prescriber list"] thead tr').lastElementChild.textContent, "Other Brand");
+  assert.equal(doc.querySelector('[data-regional-share]').style.color, "rgb(180, 35, 53)", "32% is below 32.01% despite rounded display");
+  assert.ok(!doc.body.textContent.includes("All available dates"));
+  assert.ok(!doc.body.textContent.includes("2026-08"));
+  assert.ok(!doc.body.textContent.includes("SYP + TAB"));
+  doc = render(r, { ...n, own: 3200, share: 32 });
+  assert.equal(doc.querySelector('[data-regional-share]').style.color, "rgb(0, 117, 104)");
+  doc = render({ ...r, own: 33 });
+  assert.equal(doc.querySelector('[data-regional-share]').style.color, "rgb(0, 117, 104)");
+  doc = render({ ...r, own: 0, total: 0 });
+  assert.equal(doc.querySelector('[data-regional-share]').textContent, "N/A");
+  assert.equal(doc.querySelector('[data-regional-share]').style.color, "rgb(86, 107, 128)");
+  doc = render(r, { ...n, available: false, share: null });
+  assert.match(doc.querySelector('[data-national-comparison]').textContent, /is N\/A/);
+  assert.equal(doc.querySelector('[data-regional-share]').style.color, "rgb(86, 107, 128)");
+});
+test("signature matches the reference styling, fixed company details and safely escaped personal fields", () => {
+  const personal = { ...settings, name: 'Sample <script>alert(1)</script>', title: "Assistant Manager, SBM", extension: "123", mobile: "+880 1000000000, +880 1000000001", company: "Obsolete company", address: "Obsolete address", closing: "Old closing" };
+  const doc = new JSDOM(emailSignature(personal)).window.document;
+  assert.equal(doc.querySelector("script"), null);
+  assert.equal(doc.querySelector("strong").textContent, personal.name);
+  assert.equal(doc.querySelector("strong").style.color, "rgb(46, 116, 181)");
+  assert.equal(doc.querySelector("p").textContent, "Thanks & Regards,");
+  assert.equal(doc.querySelector('[data-email-signature]').style.fontSize, "14pt");
+  assert.match(doc.body.textContent, /Assistant Manager, SBM \| Beximco Pharmaceuticals PLC \| 19 Dhanmondi R\/A, Road #7, Dhaka 1205 \| Bangladesh/);
+  assert.match(doc.body.textContent, /Ph \+880 2 8619151 ext 123 \| Fax \+880 2 8613888 \| Cell \+880 1000000000, \+880 1000000001/);
+  assert.equal(doc.querySelector('a[href="mailto:sender@example.com"]').style.color, "rgb(0, 0, 255)");
+  assert.equal(doc.querySelector('a[href="https://www.beximcopharma.com"]').style.color, "rgb(64, 64, 64)");
+  assert.ok(!doc.body.textContent.includes("Obsolete"));
+  assert.ok(!doc.body.textContent.includes("Old closing"));
 });

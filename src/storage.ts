@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Dataset, Workspace, RxFact, BrandProfile } from "./types";
-import { emptyWorkspace, settingsForNewUser } from "./types";
+import { defaultSettings, emptyWorkspace, settingsForNewUser } from "./types";
 import { normalize, overlaps } from "./engine";
 export const cloudConfigured = Boolean(
   import.meta.env.VITE_SUPABASE_URL &&
@@ -26,7 +26,10 @@ export async function localLoad(): Promise<Workspace> {
   try {
     return await new Promise((resolve, reject) => {
       const r = d.transaction("workspace").objectStore("workspace").get("main");
-      r.onsuccess = () => resolve(r.result || emptyWorkspace());
+      r.onsuccess = () => {
+        const saved = r.result as Workspace | undefined;
+        resolve(saved ? { ...saved, settings: { ...defaultSettings, ...saved.settings } } : emptyWorkspace());
+      };
       r.onerror = () => reject(r.error);
     });
   } finally {
@@ -107,10 +110,10 @@ export async function cloudLoad(): Promise<Workspace> {
       ? values[2].data.map((p) => p.payload)
       : base.profiles,
     batches: (values[3].data || []).map((b) => b.payload),
-    settings:
+    settings: { ...settingsForNewUser(user.user.email || ""), ...(
       (values[4].data as { payload?: Workspace["settings"] } | null)?.payload ||
       (values[5].data as { payload?: Workspace["settings"] } | null)?.payload ||
-      settingsForNewUser(user.user.email || ""),
+      {}) },
   };
 }
 export async function cloudHydrate(

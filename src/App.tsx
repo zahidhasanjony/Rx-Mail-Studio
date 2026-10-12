@@ -61,6 +61,7 @@ import {
   normalize,
   nationalRxShare,
   belowNational,
+  emailSignature,
 } from "./engine";
 import {
   cloudConfigured,
@@ -2122,7 +2123,7 @@ export default function App() {
                   <div>
                     <h2>Your email defaults</h2>
                     <p>
-                      Saved personally for each user in the cloud workspace.
+                      {mode === "cloud" ? "Saved for your account until you edit them." : mode === "local" ? "Saved on this device until you edit them." : "Sample defaults are temporary. Sign in to save your own."}
                     </p>
                   </div>
                 </div>
@@ -2163,29 +2164,26 @@ export default function App() {
                         }
                       />
                     </Field>
-                    <Field label="Company">
+                    <Field label="Phone extension">
                       <input
-                        value={settingsDraft.company}
-                        onChange={(e) =>
-                          setSettingsDraft({
-                            ...settingsDraft,
-                            company: e.target.value,
-                          })
-                        }
+                        inputMode="numeric"
+                        value={settingsDraft.extension || ""}
+                        onChange={(e) => setSettingsDraft({ ...settingsDraft, extension: e.target.value })}
+                      />
+                    </Field>
+                    <Field label="Mobile numbers">
+                      <input
+                        type="tel"
+                        placeholder="Include country code; separate numbers with a comma"
+                        value={settingsDraft.mobile || ""}
+                        onChange={(e) => setSettingsDraft({ ...settingsDraft, mobile: e.target.value })}
                       />
                     </Field>
                   </div>
-                  <Field label="Office address">
-                    <input
-                      value={settingsDraft.address}
-                      onChange={(e) =>
-                        setSettingsDraft({
-                          ...settingsDraft,
-                          address: e.target.value,
-                        })
-                      }
-                    />
-                  </Field>
+                  <p className="muted">Enter your designation without SBM; it is added automatically.</p>
+                  <h3>Signature preview</h3>
+                  <p className="muted">The closing, SBM department, company, office address, telephone, fax and website are fixed.</p>
+                  <div className="signature-preview" dangerouslySetInnerHTML={{ __html: emailSignature(settingsDraft) }} />
                   <hr />
                   <h3>Your team and boss in CC</h3>
                   <p className="muted">
@@ -2198,43 +2196,19 @@ export default function App() {
                       setSettingsDraft({ ...settingsDraft, personalCc })
                     }
                   />
-                  <hr />
-                  <h3>Email wording</h3>
-                  <Field label="Opening message">
-                    <textarea
-                      rows={3}
-                      value={settingsDraft.intro}
-                      onChange={(e) =>
-                        setSettingsDraft({
-                          ...settingsDraft,
-                          intro: e.target.value,
-                        })
-                      }
-                    />
-                  </Field>
-                  <Field label="Closing">
-                    <input
-                      value={settingsDraft.closing}
-                      onChange={(e) =>
-                        setSettingsDraft({
-                          ...settingsDraft,
-                          closing: e.target.value,
-                        })
-                      }
-                    />
-                  </Field>
                   <div className="settings-footer">
                     <Button
                       disabled={busy}
                       onClick={async () => {
                         if (
+                          !settingsDraft.name.trim() ||
                           !emailValid(settingsDraft.email) ||
                           settingsDraft.personalCc.some(
                             (c) => !emailValid(c.email),
                           )
                         ) {
                           notify(
-                            "Check your sender and CC email addresses.",
+                            "Enter your name and check your sender and CC email addresses.",
                             true,
                           );
                           return;
@@ -2245,7 +2219,7 @@ export default function App() {
                             settings: settingsDraft,
                           })
                         )
-                          notify("Your defaults are saved");
+                          notify(mode === "demo" ? "Sample defaults updated for this session" : "Your defaults are saved");
                       }}
                     >
                       <Check size={16} />

@@ -70,6 +70,8 @@ export interface Settings {
   company: string;
   email: string;
   address: string;
+  extension?: string;
+  mobile?: string;
   personalCc: Contact[];
   intro: string;
   closing: string;
@@ -142,6 +144,8 @@ export const defaultSettings: Settings = {
   company: "",
   email: "",
   address: "",
+  extension: "",
+  mobile: "",
   personalCc: [],
   intro: "",
   closing: "Regards,",

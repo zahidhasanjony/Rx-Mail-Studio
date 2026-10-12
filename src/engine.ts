@@ -304,10 +304,25 @@ export function regionalQueue(
         }),
     );
 }
+export function emailSignature(settings: Settings) {
+  const e = escapeHtml;
+  const title = settings.title.trim().replace(/(?:^|,\s*|\s+)SBM$/i, "");
+  const email = emailValid(settings.email)
+    ? `<a href="mailto:${e(settings.email)}" style="color:#0000ff;text-decoration:underline">${e(settings.email)}</a>`
+    : e(settings.email);
+  const contacts = [
+    `Ph +880 2 8619151${settings.extension?.trim() ? " ext " + e(settings.extension.trim()) : ""}`,
+    "Fax +880 2 8613888",
+    settings.mobile?.trim() ? "Cell " + e(settings.mobile.trim()) : "",
+    email,
+    '<a href="https://www.beximcopharma.com" style="color:#404040;text-decoration:underline">www.beximcopharma.com</a>',
+  ].filter(Boolean).join(" | ");
+  return `<div data-email-signature="true" style="font-family:Calibri,Arial,sans-serif;font-size:14pt;line-height:1.3;color:#404040;text-align:left"><p style="margin:0 0 28px;color:#2e74b5;font-weight:bold">Thanks &amp; Regards,</p><p style="margin:0"><strong style="color:#2e74b5">${e(settings.name)}</strong> | ${title ? e(title) + ", " : ""}SBM | Beximco Pharmaceuticals PLC | 19 Dhanmondi R/A, Road #7, Dhaka 1205 | Bangladesh<br>${contacts}</p></div>`;
+}
 export function emailHtml(
   report: RegionReport,
   profile: BrandProfile,
-  month: string,
+  _month: string,
   contact: HierarchyRow,
   settings: Settings,
   national: NationalRxShare | undefined = report.national,
@@ -329,12 +344,16 @@ export function emailHtml(
     const below = belowNational(d, national);
     const flagStyle = below ? ";color:#b42335;font-weight:bold" : "";
     const share = d.genericCount ? (d.ownCount / d.genericCount * 100).toFixed(1) + "%" : "N/A";
-    const other = d.genericCount - d.ownCount;
+    const other = Object.entries(d.otherBrands).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([brand, count]) => `${e(brand)} (${count})`).join(", ") || "—";
     return `<tr${below ? ' data-below-national="true"' : ''} style="background:${below ? "#fff1f2" : "#fff"}"><td class="rx-detail" style="${cell}">${e(d.mpe)}</td><td title="${e(d.name)}" style="${cell}${flagStyle}">${e(d.code)}</td><td class="rx-detail" style="${cell}">${e(d.specialty)}</td><td style="${cell}">${d.genericCount}</td><td style="${cell}">${d.ownCount}</td><td style="${cell}${flagStyle}">${below ? "↓ " : ""}${share}</td><td class="rx-detail" style="${cell}">${other}</td></tr>`;
   }).join("") || `<tr><td colspan="7" style="${cell};padding:20px">No Rx records for this market in the selected period.</td></tr>`;
   const benchmark = national?.available && national.share !== null ? national.share.toFixed(1) + "%" : "N/A";
-  const signature = [settings.name, settings.title, settings.company, settings.address, settings.email].filter(s => s.trim()).map(e).join("<br>");
-  return `<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body.rx-compact .rx-detail{display:none}body.rx-compact .rx-share-value{font-size:14px}</style></head><body style="margin:0;padding:24px 16px;font:14px Arial,sans-serif;color:#16324f;background:#fff"><div style="max-width:1100px;margin:auto"><p style="margin:0 0 20px">Dear ${e(contact.salutation)},</p><p style="margin:0 0 8px;font-size:18px;font-weight:bold;color:#007568">${e(profile.generic)} · ${e(profile.brand)}</p><p style="margin:0 0 24px;color:#566b80;font-size:12px">${e(report.region)} · ${e(report.structure)} | ${e(month)} | ${e(profile.forms.join(" + ") || "All dosage forms")}</p><p style="font-weight:bold;margin:0 0 12px">Regional Rx share</p><table role="presentation" style="border-collapse:collapse;width:100%;table-layout:fixed"><tr>${shares}</tr></table><p style="font-size:11px;color:#566b80;margin:8px 0 18px">Share of all ${e(profile.generic)} Rx · Total ${report.total}</p><p style="padding:12px;text-align:center;background:${national?.available ? "#eee6fc" : "#f3f6fc"};color:${national?.available ? "#6339a7" : "#566b80"};font-weight:bold;margin:0 0 22px">National ${e(profile.brand)} share ${benchmark}</p><p style="font-weight:bold;margin:0 0 12px">Prescriber list</p><table aria-label="Prescriber list" style="border-collapse:collapse;width:100%;font-size:12px"><thead><tr>${["MPE", "Doctor code", "Specialty", "Generic Rx", profile.brand + " Rx", profile.brand + " share", "Other Rx"].map((h, i) => head(h, [0, 2, 6].includes(i))).join("")}</tr></thead><tbody>${rows}</tbody></table>${national?.available ? `<p style="font-size:11px;color:#b42335;margin:10px 0 20px">↓ Red = below national ${e(profile.brand)} share (${benchmark}).</p>` : '<p style="font-size:11px;color:#566b80;margin:10px 0 20px">National benchmark unavailable.</p>'}<p style="line-height:1.6;margin:0">${e(settings.closing || "Regards,")}<br>${signature}</p></div></body></html>`;
+  const regionalShare = report.total ? (report.own / report.total * 100).toFixed(1) + "%" : "N/A";
+  const comparisonColor = national?.available && report.total > 0
+    ? belowNational({ ownCount: report.own, genericCount: report.total }, national) ? "#b42335" : "#007568"
+    : "#566b80";
+  return `<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body.rx-compact .rx-detail{display:none}body.rx-compact .rx-share-value{font-size:14px}</style></head><body style="margin:0;padding:24px 16px;font:14px Arial,sans-serif;color:#16324f;background:#fff"><div style="max-width:1100px;margin:auto"><p style="margin:0 0 20px">Dear ${e(contact.salutation)},</p><p style="margin:0 0 8px;font-size:18px;font-weight:bold;color:#007568">${e(profile.generic)} · ${e(profile.brand)}</p><p style="font-weight:bold;margin:0 0 12px">Regional Rx share</p><p data-national-comparison="true" style="margin:0 0 14px;line-height:1.6">The National Rx share of <b>${e(profile.brand)}</b> (Beximco’s Brand) is <b>${benchmark}</b> whereas yours is <b data-regional-share="true" style="color:${comparisonColor}">${regionalShare}</b>.</p><table role="presentation" style="border-collapse:collapse;width:100%;table-layout:fixed"><tr>${shares}</tr></table><p style="font-size:11px;color:#566b80;margin:8px 0 18px">Share of all ${e(profile.generic)} Rx · Total ${report.total}</p><p style="font-weight:bold;margin:0 0 12px">Prescriber list</p><table aria-label="Prescriber list" style="border-collapse:collapse;width:100%;font-size:12px"><thead><tr>${["MPE", "Doctor code", "Specialty", "Generic Rx", profile.brand + " Rx", profile.brand + " share", "Other Brand"].map((h, i) => head(h, [0, 2, 6].includes(i))).join("")}</tr></thead><tbody>${rows}</tbody></table>${national?.available ? `<p style="font-size:11px;color:#b42335;margin:10px 0 20px">↓ Red = below national ${e(profile.brand)} share (${benchmark}).</p>` : '<p style="font-size:11px;color:#566b80;margin:10px 0 20px">National benchmark unavailable.</p>'}<div style="margin-top:24px">${emailSignature(settings)}</div></div></body></html>`;
 }
 export function makeMail(
   report: RegionReport,

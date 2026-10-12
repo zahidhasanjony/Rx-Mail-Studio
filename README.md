@@ -26,6 +26,10 @@ Upload source spreadsheets and a recipient hierarchy through the interface. Revi
 
 The own-brand summary appears before the prescriber table, followed by up to four leading competitors. Counts use the selected market denominator. Doctor codes identify records. Missing routing or reporting coverage blocks the affected email.
 
+National share is own-brand Rx divided by all generic Rx across all source regions, multiplied by 100, within the selected month, cycle and dosage forms. Each source record is counted once regardless of ACD/CCD routing. The comparison sentence appears immediately above the regional share table; regional share is red below the national benchmark and green at or above it. Doctors below the same benchmark are marked red. The Other Brand column lists each competitor with its Rx count, such as `FENAT (1), TOTI (2)`.
+
+In **Settings → Your email defaults**, enter the sender name, designation, email, phone extension and mobile numbers. The signature uses the fixed Beximco office details and blue/gray reference styling. Cloud defaults are private to the signed-in user and stay saved until edited; device defaults stay in IndexedDB. Sample defaults last only for the session. Saved batches retain their original content; generate a new batch after changing defaults or email formatting.
+
 ## Email export and Outlook
 
 Generating a batch downloads one ZIP containing a separate `.eml` file for every selected regional email. To, CC, sender, subject, regional Rx share summary, prescriber table and signature are preserved. Batch history can download the complete ZIP again, and previews or batch rows can download individual `.eml` files. Downloading keeps opening status unchanged.
