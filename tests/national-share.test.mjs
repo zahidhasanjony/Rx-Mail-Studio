@@ -1,32 +1,31 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { belowNational, nationalRxShare, reports, makeMail } from "../src/engine";
-import { defaultSettings, starterProfiles } from "../src/types";
-import type { Dataset, Hierarchy, RxFact } from "../src/types";
+import { belowNational, nationalRxShare, reports, makeMail } from "../src/engine.ts";
+import { defaultSettings, starterProfiles } from "../src/types.ts";
 import { JSDOM } from "jsdom";
 const profile = starterProfiles[0];
-const fact = (brand: string, count: number, region = "R1", extra: Partial<RxFact> = {}): RxFact => ({
+const fact = (brand, count, region = "R1", extra = {}) => ({
   date: "2026-08-05", generic: "Ketotifen", brand, company: "Example", form: "SYP",
   doctorCode: "D1", doctorName: "Example doctor", specialty: "Medicine", acdRegion: region,
   acdMpe: "M1", ccdRegion: "C1", ccdMpe: "CM1", count, sourceRow: 2, sheet: "Rx", ...extra,
 });
-const source = (facts: RxFact[], extra: Partial<Dataset> = {}): Dataset => ({
+const source = (facts, extra = {}) => ({
   id: "source", name: "Rx", hash: "test", importedAt: "2026-08-11", active: true,
   from: "2026-08-01", to: "2026-08-10", rows: facts.length, invalidRows: 0,
   sheets: ["Rx"], catalog: [], dates: [...new Set(facts.map(f => f.date))], facts, ...extra,
 });
-const hierarchy: Hierarchy = { id: "h", name: "Q3", effectiveFrom: "2026-07-01", createdAt: "2026-07-01",
+const hierarchy = { id: "h", name: "Q3", effectiveFrom: "2026-07-01", createdAt: "2026-07-01",
   rows: [{ structure: "ACD", region: "R1", rseName: "Example RSE", rseEmail: "rse@example.com", salutation: "Zakir Bhai", cc: [], active: true }] };
 const settings = { ...defaultSettings, name: "Example sender", email: "sender@example.com", intro: "Long boilerplate to omit" };
 test("national counts every eligible record once, independent of ACD/CCD routing and chosen recipients", () => {
   const ds = source([fact("TOFEN", 25), fact("FENAT", 75), fact("TOFEN", 39, "R2"), fact("FENAT", 61, "R2")]);
   const n = nationalRxShare([ds], "2026-08", profile, "first");
   assert.equal(n.total, 200); assert.equal(n.own, 64); assert.equal(n.share, 32);
-  for (const structures of [["ACD"], ["CCD"], ["ACD", "CCD"]] as ("ACD" | "CCD")[][]) {
+  for (const structures of [["ACD"], ["CCD"], ["ACD", "CCD"]]) {
     const result = reports([ds], "2026-08", profile, structures, "first");
     assert.ok(result.every(r => r.national?.total === 200 && r.national?.share === 32));
   }
-  const r = reports([ds], "2026-08", profile, ["ACD"], "first").find(r => r.region === "R1")!;
+  const r = reports([ds], "2026-08", profile, ["ACD"], "first").find(r => r.region === "R1");
   assert.equal(r.own / r.total * 100, 25);
   assert.equal(makeMail(r, profile, "August 2026 · 1–10", hierarchy, settings).national?.share, 32);
 });
@@ -48,7 +47,7 @@ test("strict below comparison includes zero own Rx, excludes equality and missin
 test("missing national route coverage, empty markets and overlapping source dates do not produce a misleading benchmark", () => {
   const ds = source([fact("TOFEN", 32), fact("FENAT", 68)]);
   const missing = nationalRxShare([ds], "2026-08", profile, "first", [...hierarchy.rows, { structure: "ACD", region: "R2", active: true }]);
-  assert.equal(missing.available, false); assert.equal(missing.share, null); assert.match(missing.reason!, /no source coverage/);
+  assert.equal(missing.available, false); assert.equal(missing.share, null); assert.match(missing.reason, /no source coverage/);
   assert.equal(nationalRxShare([ds, { ...ds, id: "duplicate" }], "2026-08", profile).available, false);
   assert.equal(nationalRxShare([source([])], "2026-08", profile).share, null);
   const coveredZero = source([fact("TOFEN", 32), fact("FENAT", 68)], { regions: { ACD: ["R1", "R2"], CCD: ["C1"] }, regionDates: { ACD: { R1: ["2026-08-05"], R2: ["2026-08-05"] }, CCD: { C1: ["2026-08-05"] } } });
@@ -65,8 +64,8 @@ test("clean email has five centered brand cells, doctor codes, exact red rows an
   assert.equal(mail.national?.share, 32);
   assert.ok(!mail.html.includes(settings.intro));
   const doc = new JSDOM(mail.html).window.document;
-  assert.equal(doc.querySelector('table[role="presentation"]')!.querySelectorAll("td").length, 5);
-  const table = doc.querySelector('table[aria-label="Prescriber list"]')!;
+  assert.equal(doc.querySelector('table[role="presentation"]').querySelectorAll("td").length, 5);
+  const table = doc.querySelector('table[aria-label="Prescriber list"]');
   assert.equal(table.querySelectorAll('tr[data-below-national="true"]').length, 2);
   assert.ok([...table.querySelectorAll("th,td")].every(c => c.getAttribute("style")?.includes("text-align:center;vertical-align:middle")));
   assert.deepEqual([...table.querySelectorAll('tr[data-below-national="true"]')].map(r => r.children[1].textContent), ["D1", "D4"]);
