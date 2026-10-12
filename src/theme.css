@@ -194,6 +194,13 @@ input::placeholder, textarea::placeholder { color: #6f8194; }
 .settings-card > h2 { color: #16324f; }
 .toast { color: var(--rx-primary); border-color: var(--border); }
 .toast.error { color: var(--rx-red); border-color: #f5c3c9; }
+.outlook-connection details { margin-top: 16px; text-align: left; }
+.outlook-connection summary { cursor: pointer; font-weight: 600; }
+.outlook-connection details label { display: grid; gap: 6px; margin: 12px 0; font-size: 12px; }
+.outlook-connection code { overflow-wrap: anywhere; }
+.outlook-progress { display: grid; gap: 8px; margin-top: 12px; }
+.outlook-progress progress { width: 100%; accent-color: var(--rx-primary); }
+.outlook-error { color: var(--rx-red); }
 .brand-options button small, .brand-options > p { color: var(--muted); }
 .brand-options button.highlighted { background: var(--rx-mint); }
 @media (max-width: 1200px) {

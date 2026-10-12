@@ -15,6 +15,7 @@ const version =
 const shell = [
   "/",
   "/index.html",
+  "/outlook-auth.html",
   "/icon.svg",
   "/icon-192.png",
   "/icon-512.png",

@@ -78,7 +78,7 @@ test("compiled login restores the cloud indicator, preserves admin page access a
       const button = (text) => [...w.document.querySelectorAll("button")].find((b) => b.textContent.trim() === text);
       const fill = (input, value) => { Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, "value").set.call(input, value); input.dispatchEvent(new w.Event("input", { bubbles: true })); };
       try {
-        w.eval(code.replaceAll("import.meta.url", '"https://rxmail.vercel.app/"'));
+        w.eval(code.replaceAll("import.meta.resolve", "undefined").replaceAll("import.meta.url", '"https://rxmail.vercel.app/"'));
         await waitFor(() => button("Settings"));
         if (role === "stale") {
           await waitFor(() => w.document.querySelector('[aria-label="Username"]'));

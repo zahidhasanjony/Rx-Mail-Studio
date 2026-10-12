@@ -43,7 +43,7 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
   w.HTMLAnchorElement.prototype.click = function () {
     downloads.push({ name: this.download, blob: blobs.get(this.href) });
   };
-  w.eval(code.replaceAll("import.meta.url", '"https://rx-mail-studio.test/"'));
+  w.eval(code.replaceAll("import.meta.resolve", "undefined").replaceAll("import.meta.url", '"https://rx-mail-studio.test/"'));
   const waitFor = async (check) => {
     for (let i = 0; i < 100; i++) {
       if (check()) return;
@@ -70,6 +70,8 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
     assert.match(w.document.body.textContent, /fictional doctors/);
     const initialFormat = w.document.querySelector(".batch-download-choice select");
     assert.equal(initialFormat.value, "excel", "Outlook Excel is the default download");
+    assert.ok(button("Android mail · 6"), "Android generation has a separate button");
+    assert.equal(button("Android mail · 6").disabled, true, "sample data cannot write mailbox drafts");
     initialFormat.value = "eml";
     initialFormat.dispatchEvent(new w.Event("change", { bubbles: true }));
     await new Promise(resolve => setTimeout(resolve, 20));
@@ -218,6 +220,7 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
     assert.ok(button("Download .eml ZIP"), "Existing batch export remains available");
     assert.ok(button("Download Outlook launcher"));
     assert.ok(button("Download Outlook Excel (.xlsm)"));
+    assert.ok(button("Android mail · Create Outlook drafts"), "saved batches offer Android drafts separately");
     const generatedExcel = unzipSync(new Uint8Array(await downloads.at(-1).blob.arrayBuffer()));
     assert.match(strFromU8(generatedExcel["xl/worksheets/sheet1.xml"]), /Review TOFEN for/);
     assert.match(strFromU8(generatedExcel["xl/worksheets/sheet2.xml"]), /Arial Narrow/);
@@ -225,6 +228,9 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
     await waitFor(() => w.document.querySelector(".batch-list"));
     button("Settings").click();
     await waitFor(() => button("Connect to cloud"));
+    assert.ok(w.document.querySelector(".outlook-connection"));
+    assert.equal(button("Connect Microsoft account").disabled, true, "Microsoft sign-in needs a valid app registration");
+    assert.ok(button("Save Microsoft setup"));
     button("Connect to cloud").click();
     await waitFor(() => w.document.querySelector('[aria-label="Username"]'));
     assert.ok(w.document.querySelector('[autocomplete="username"]'));

@@ -142,6 +142,13 @@ export interface Mail {
   rxCount: number;
   status: "Prepared" | "Opened" | "Failed";
   error?: string;
+  outlookDraft?: {
+    mailbox: string;
+    status: "Created" | "Failed";
+    messageId?: string;
+    createdAt?: string;
+    error?: string;
+  };
   national?: NationalRxShare;
 }
 export interface Batch {

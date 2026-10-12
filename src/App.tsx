@@ -32,6 +32,7 @@ import {
   Star,
   LogOut,
   RefreshCw,
+  Smartphone,
 } from "lucide-react";
 import type {
   Workspace,
@@ -82,6 +83,9 @@ import type { Mode } from "./storage";
 import { usernameSignIn, currentAccount, AccountServiceError } from "./auth";
 import type { UserAccount } from "./auth";
 import UsersPage from "./UsersPage";
+import OutlookConnection from "./OutlookConnection";
+import { readOutlookConfig, saveOutlookConfig, restoreOutlook, connectOutlook, disconnectOutlook, outlookToken, OUTLOOK_RETURN_KEY } from "./outlook-auth";
+import { graphClient, createOutlookDrafts } from "./outlook-drafts";
 import RegionReview from "./RegionReview";
 import EmailTemplateEditor from "./EmailTemplateEditor";
 import { emailTemplateFor, templateError } from "./email-template";
@@ -438,6 +442,13 @@ function BrandPicker({
 
 export default function App() {
   const initialChoice = useRef(false);
+  const [outlookConfig, setOutlookConfig] = useState(readOutlookConfig);
+  const [outlookMailbox, setOutlookMailbox] = useState("");
+  const [outlookBusy, setOutlookBusy] = useState(false);
+  const [outlookProgress, setOutlookProgress] = useState<{ done: number; total: number } | null>(null);
+  const [outlookSetup, setOutlookSetup] = useState(false);
+  const outlookRunning = useRef(false);
+  const outlookReturnChecked = useRef(false);
   const [bridgeConnected, setBridgeConnected] = useState(false),
     [bridgeAuto, setBridgeAuto] = useState(
       localStorage.getItem("rxm-bridge-auto-v2") === "true",
@@ -514,6 +525,23 @@ export default function App() {
   const isAdmin = mode === "cloud" && account?.role === "owner";
   const [deleteSource, setDeleteSource] = useState<Dataset | null>(null);
   const [publishDefault, setPublishDefault] = useState(false);
+  useEffect(() => {
+    let active = true;
+    restoreOutlook(outlookConfig).then(value => { if (active) setOutlookMailbox(value?.username || ""); })
+      .catch(error => { if (active) notify((error as Error).message, true); });
+    return () => { active = false; };
+  }, [outlookConfig]);
+  useEffect(() => {
+    if (loading || mode === "demo" || outlookReturnChecked.current) return;
+    const id = sessionStorage.getItem(OUTLOOK_RETURN_KEY);
+    if (!id) return;
+    const batch = workspace.batches.find(batch => batch.id === id);
+    if (batch) {
+      outlookReturnChecked.current = true;
+      sessionStorage.removeItem(OUTLOOK_RETURN_KEY);
+      setBatchModal(batch);
+    }
+  }, [loading, mode, workspace.batches]);
   const selectedMonths = reportingMonths(month, endMonth);
   const periodLabel = reportingPeriod(month, endMonth, period);
   const composeSettings = { ...workspace.settings, emailTemplate };
@@ -1036,7 +1064,9 @@ export default function App() {
       notify("Hierarchy version saved");
     }
   }
-  async function generate() {
+  async function generate(destination: "download" | "android" = "download") {
+    if (destination === "android" && mode === "demo") { notify("Connect your workspace to create real Outlook drafts.", true); return; }
+    if (destination === "android" && !outlookMailbox) { setOutlookSetup(true); return; }
     if (!marketProfile) return;
     if (!doctorSelectionValid) { notify("Enter a positive whole number of doctors.", true); return; }
     if (compositionError) { notify(compositionError, true); return; }
@@ -1076,6 +1106,7 @@ export default function App() {
         await update({ ...workspace, batches: [batch, ...workspace.batches] })
       ) {
         setBatchModal(batch);
+        if (destination === "android") { await androidBatch(batch); return; }
         if (batchDownload === "excel") await downloadExcelBatch(batch);
         else downloadEmlBatch(batch);
         if (
@@ -1088,6 +1119,60 @@ export default function App() {
     } catch (e) {
       notify((e as Error).message, true);
     }
+  }
+  async function androidBatch(batch: Batch) {
+    if (mode === "demo" || outlookRunning.current) return;
+    if (!outlookMailbox) { setOutlookSetup(true); return; }
+    if (!navigator.onLine) { notify("Connect to the internet to create Outlook drafts.", true); return; }
+    outlookRunning.current = true;
+    setBusy(true); setProgress(0); setBusyText("Preparing Android Outlook drafts");
+    setOutlookBusy(true);
+    setOutlookProgress({ done: 0, total: batch.mails.length });
+    sessionStorage.setItem(OUTLOOK_RETURN_KEY, batch.id);
+    try {
+      const token = await outlookToken(outlookConfig);
+      if (!token) return;
+      sessionStorage.removeItem(OUTLOOK_RETURN_KEY);
+      const run = () => createOutlookDrafts(batch, graphClient(token), localStorage, (done, total, current) => {
+        setOutlookProgress({ done, total });
+        setProgress(done / total * 100);
+        setBusyText(`Preparing Outlook drafts: ${done}/${total}`);
+        setBatchModal({ ...current, mails: [...current.mails] });
+      });
+      const updated = navigator.locks ? await navigator.locks.request("rxm-outlook:" + batch.settings.email + ":" + batch.id, { ifAvailable: true }, lock => {
+        if (!lock) throw new Error("This batch is already being prepared in another tab.");
+        return run();
+      }) : await run();
+      const saved = await update({ ...workspaceRef.current, batches: workspaceRef.current.batches.map(value => value.id === batch.id ? updated : value) });
+      setBatchModal(updated);
+      const created = updated.mails.filter(mail => mail.outlookDraft?.status === "Created").length;
+      notify(saved ? `${created} of ${updated.mails.length} emails prepared in Outlook. Open Outlook → Drafts to review and send.${created < updated.mails.length ? " Retry Android mail for the remaining emails." : ""}` : "Outlook results could not be saved to History. Retry this batch to recover drafts already created.", !saved || created < updated.mails.length);
+    } catch (error) { notify((error as Error).message, true); }
+    finally { outlookRunning.current = false; setBusy(false); setOutlookBusy(false); setOutlookProgress(null); }
+  }
+  async function saveMicrosoftSetup(config: typeof outlookConfig) {
+    setOutlookBusy(true);
+    try {
+      const clean = saveOutlookConfig(config);
+      await disconnectOutlook(outlookConfig);
+      setOutlookConfig(clean); setOutlookMailbox("");
+      notify("Microsoft setup saved on this device. Connect your work account.");
+    } catch (error) { notify((error as Error).message, true); }
+    finally { setOutlookBusy(false); }
+  }
+  async function connectMicrosoftAccount() {
+    setOutlookBusy(true);
+    try {
+      if (batchModal) sessionStorage.setItem(OUTLOOK_RETURN_KEY, batchModal.id);
+      await connectOutlook(outlookConfig, workspace.settings.email);
+    } catch (error) { notify((error as Error).message, true); }
+    finally { setOutlookBusy(false); }
+  }
+  async function disconnectMicrosoftAccount() {
+    setOutlookBusy(true);
+    try { await disconnectOutlook(outlookConfig); setOutlookMailbox(""); }
+    catch (error) { notify((error as Error).message, true); }
+    finally { setOutlookBusy(false); }
   }
   function downloadEmlBatch(batch: Batch) {
     try {
@@ -1212,6 +1297,8 @@ export default function App() {
   async function signOutAccount() {
     setBusy(true); setBusyText("Signing out");
     try {
+      await disconnectOutlook(outlookConfig).catch(() => {});
+      setOutlookMailbox(""); sessionStorage.removeItem(OUTLOOK_RETURN_KEY);
       const result = await supabase?.auth.signOut({ scope: "local" });
       if (result?.error) throw result.error;
       setAccount(null); setUserEmail("");
@@ -1749,12 +1836,16 @@ export default function App() {
                     </select>
                   </label>
                   <Button
-                    disabled={busy || loading || excelDownloading || !selected.size || !doctorSelectionValid || !!compositionError}
-                    onClick={generate}
+                    disabled={busy || loading || excelDownloading || outlookBusy || !selected.size || !doctorSelectionValid || !!compositionError}
+                    onClick={() => void generate()}
                   >
                     <Mail size={17} />
                     Generate {selected.size || ""} emails
                     <ArrowRight size={16} />
+                  </Button>
+                  <Button variant="secondary" disabled={busy || loading || excelDownloading || outlookBusy || !selected.size || !doctorSelectionValid || !!compositionError || mode === "demo"} onClick={() => void generate("android")}>
+                    <Smartphone size={17} />
+                    Android mail · {selected.size || ""}
                   </Button>
                 </div>
               </section>
@@ -2319,6 +2410,7 @@ export default function App() {
                 </div>
               </section>
               <div>
+                <OutlookConnection key={JSON.stringify(outlookConfig)} config={outlookConfig} mailbox={outlookMailbox} busy={outlookBusy} onSave={saveMicrosoftSetup} onConnect={connectMicrosoftAccount} onDisconnect={disconnectMicrosoftAccount} />
                 <section className="card small-card">
                   <div className="connection-icon">
                     <Monitor size={24} />
@@ -3184,11 +3276,11 @@ export default function App() {
           </div>
         </Modal>
       )}
-      {batchModal && !preview && (
+      {batchModal && !preview && !outlookSetup && (
         <Modal
           title={`${batchModal.mails.length} emails prepared`}
           wide
-          onClose={() => setBatchModal(null)}
+          onClose={() => { if (!outlookBusy) setBatchModal(null); }}
         >
           <div className="modal-body">
             <div className="batch-success">
@@ -3230,6 +3322,9 @@ export default function App() {
                         >
                           {m.status}
                         </span>
+                        {m.outlookDraft && <small className={`subvalue ${m.outlookDraft.status === "Failed" ? "outlook-error" : ""}`}>
+                          {m.outlookDraft.status === "Created" ? "Outlook draft created" : m.outlookDraft.error}
+                        </small>}
                         {m.error && (
                           <small className="subvalue">{m.error}</small>
                         )}
@@ -3238,6 +3333,7 @@ export default function App() {
                         <button
                           className="icon-button"
                           aria-label={`Preview ${m.region}`}
+                          disabled={outlookBusy}
                           onClick={() =>
                             setPreview({ title: m.subject, html: m.html, mail: m, sender: batchModal.settings, createdAt: batchModal.createdAt })
                           }
@@ -3258,10 +3354,15 @@ export default function App() {
               </table>
             </div>
             <p className="tiny">Review and send manually. Outlook Excel requires Excel for Windows, permitted macros and Classic Outlook.</p>
+            {outlookProgress && <div className="outlook-progress" role="status" aria-live="polite">
+              <progress value={outlookProgress.done} max={outlookProgress.total} />
+              <span>Preparing Outlook drafts: {outlookProgress.done}/{outlookProgress.total}</span>
+            </div>}
           </div>
           <div className="modal-footer">
             <Button
               variant="secondary"
+              disabled={outlookBusy}
               onClick={() => {
                 setBatchModal(null);
                 setPage("history");
@@ -3272,6 +3373,7 @@ export default function App() {
             <Button
               variant="secondary"
               disabled={
+                busy || outlookBusy ||
                 mode === "demo" ||
                 !batchModal.mails.some((m) => m.status !== "Opened")
               }
@@ -3279,6 +3381,10 @@ export default function App() {
             >
               <Monitor size={16} />
               Open in Outlook
+            </Button>
+            <Button variant="secondary" disabled={busy || outlookBusy || mode === "demo"} onClick={() => void androidBatch(batchModal)}>
+              <Smartphone size={16} />
+              {outlookBusy ? "Preparing Android mail…" : "Android mail · Create Outlook drafts"}
             </Button>
             <Button
               variant="secondary"
@@ -3318,6 +3424,9 @@ export default function App() {
           </div>
         </Modal>
       )}
+      {outlookSetup && <Modal title="Android Outlook mail" onClose={() => { if (!outlookBusy) setOutlookSetup(false); }}>
+        <div className="modal-body"><OutlookConnection key={JSON.stringify(outlookConfig)} config={outlookConfig} mailbox={outlookMailbox} busy={outlookBusy} onSave={saveMicrosoftSetup} onConnect={connectMicrosoftAccount} onDisconnect={disconnectMicrosoftAccount} /></div>
+      </Modal>}
       {login && (
         <Modal
           title="Connect your SBM workspace"
