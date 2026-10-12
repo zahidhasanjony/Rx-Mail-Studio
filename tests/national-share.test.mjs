@@ -75,7 +75,7 @@ test("clean email has five centered brand cells, doctor codes, exact red rows an
   assert.ok([...table.querySelectorAll("th,td")].every(c => c.getAttribute("style")?.includes("text-align:center;vertical-align:middle")));
   assert.deepEqual([...table.querySelectorAll('tr[data-below-national="true"]')].map(r => r.children[1].textContent), ["D1", "D4"]);
   assert.equal(doc.querySelector('[data-national-comparison]').textContent,
-    "The National Rx share of TOFEN (Beximco’s Brand) is 32.0% whereas yours is 27.9%.");
+    "The National Rx share of TOFEN is 32.0% whereas yours is 27.9%.");
   assert.equal(doc.querySelector('[data-national-comparison]').nextElementSibling.tagName, "TABLE");
   assert.ok(mail.html.indexOf("Regional Rx share") < mail.html.indexOf("Prescriber list"));
 });
