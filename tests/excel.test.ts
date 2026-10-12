@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { zipSync, strToU8 } from "fflate";
+import { zipSync, strToU8, unzipSync, strFromU8 } from "fflate";
 import {
   inspectWorkbook,
   importRx,
@@ -82,6 +82,20 @@ test("streaming Excel import handles shared strings, XML entities and self-closi
   assert.equal(d.facts[0].acdRegion, "D5");
   assert.deepEqual(d.facts[0].sourceRows, [2, 3]);
   assert.equal(d.catalog[0].brand, "TOFEN");
+});
+test("catalogue discovery includes Beximco pairs outside the retained Rx markets and excludes competitors", async () => {
+  const archive = unzipSync(new Uint8Array(await workbook().arrayBuffer()));
+  const row = (number: number, company: string, brand: string) => {
+    const fields = ["Montelukast", brand, company, "TAB", "DOC002", "Dr New", "Medicine", "D5", "D501", "D6", "D601"];
+    return `<row r="${number}"><c r="A${number}"><v>46188</v></c>${fields.map((value,i) => `<c r="${String.fromCharCode(66+i)}${number}" t="inlineStr"><is><t>${escape(value)}</t></is></c>`).join("")}</row>`;
+  };
+  archive["xl/worksheets/sheet1.xml"] = xml(strFromU8(archive["xl/worksheets/sheet1.xml"]).replace("</sheetData>",row(4,"Beximco Pharmaceuticals PLC","NEWBEX")+row(5,"Other company","COMPETITOR")+"</sheetData>"));
+  const file = new File([zipSync(archive) as unknown as BlobPart],"new-markets.xlsx");
+  const imported = await importRx(file,await inspectWorkbook(file),()=>{},["Ketotifen"]);
+  assert.ok(imported.facts.every(f => f.generic === "Ketotifen"));
+  assert.equal(imported.facts[0].count,2);
+  assert.equal(imported.catalog.find(p => p.brand === "NEWBEX")?.company,"Beximco Pharmaceuticals PLC");
+  assert.ok(!imported.catalog.some(p => p.brand === "COMPETITOR"));
 });
 test("ASE columns are preserved and legacy mappings require one verified parent", async () => {
   const file = workbook(true);

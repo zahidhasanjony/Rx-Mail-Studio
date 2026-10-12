@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Dataset, Workspace, RxFact, BrandProfile } from "./types";
 import { defaultSettings, emptyWorkspace, settingsForNewUser } from "./types";
+import { reconcileBrandPairs } from "./catalogue";
 import { reportingMonths } from "./reporting";
 import { templateError } from "./email-template";
 import type { EmailTemplate, Hierarchy } from "./types";
@@ -31,7 +32,7 @@ export async function localLoad(): Promise<Workspace> {
       const r = d.transaction("workspace").objectStore("workspace").get("main");
       r.onsuccess = () => {
         const saved = r.result as Workspace | undefined;
-        resolve(saved ? { ...saved, settings: { ...defaultSettings, ...saved.settings } } : emptyWorkspace());
+        resolve(saved ? { ...saved, profiles: reconcileBrandPairs(saved.profiles, saved.datasets), settings: { ...defaultSettings, ...saved.settings } } : emptyWorkspace());
       };
       r.onerror = () => reject(r.error);
     });
@@ -85,6 +86,22 @@ export async function cloudExportHierarchy(id: string): Promise<Hierarchy> {
   if (!result.data) throw new Error("Hierarchy version not found");
   return result.data as Hierarchy;
 }
+export async function cloudProfiles(): Promise<BrandProfile[]> {
+  if (!supabase) throw new Error("Cloud connection missing");
+  const profiles: BrandProfile[] = [];
+  for (let offset = 0; ; offset += 500) {
+    const result = await supabase.from("rxm_profiles").select("id,payload").order("id").range(offset, offset + 499);
+    fail(result.error);
+    profiles.push(...(result.data || []).map(row => ({ ...row.payload, id: row.id })));
+    if ((result.data?.length || 0) < 500) return profiles;
+  }
+}
+export async function cloudUpdateCatalogue() {
+  const client = await requireAdmin();
+  const result = await client.rpc("rxm_refresh_catalogue");
+  fail(result.error);
+  return { added: Number(result.data || 0), profiles: await cloudProfiles() };
+}
 export async function cloudLoad(): Promise<Workspace> {
   if (!supabase) throw new Error("Cloud connection is not configured");
   const { data: user, error: ue } = await supabase.auth.getUser();
@@ -110,7 +127,7 @@ export async function cloudLoad(): Promise<Workspace> {
       .from("rxm_hierarchies")
       .select("*")
       .order("created_at", { ascending: false }),
-    supabase.from("rxm_profiles").select("*"),
+    cloudProfiles().then(data => ({ data, error: null })),
     supabase
       .from("rxm_batches")
       .select("*")
@@ -130,19 +147,15 @@ export async function cloudLoad(): Promise<Workspace> {
   ]);
   values.forEach((v) => fail(v.error));
   const base = emptyWorkspace();
+  const storedProfiles = values[2].data as BrandProfile[];
+  const datasets: Dataset[] = (values[0].data || []).map(d => ({ ...d.payload, id: d.id, active: d.active, facts: [] }));
   return {
     ...base,
     sharedEmailTemplate: values[6].data?.payload,
-    datasets: (values[0].data || []).map((d) => ({
-      ...d.payload,
-      id: d.id,
-      active: d.active,
-      facts: [],
-    })),
+    datasets,
+    persistedProfileIds: storedProfiles.map(p => p.id),
     hierarchies: (values[1].data || []).map((h) => h.payload),
-    profiles: values[2].data?.length
-      ? values[2].data.map((p) => p.payload)
-      : base.profiles,
+    profiles: reconcileBrandPairs(storedProfiles, datasets),
     batches: (values[3].data || []).map((b) => b.payload),
     settings: { ...settingsForNewUser(user.user.email || ""), ...(
       (values[4].data as { payload?: Workspace["settings"] } | null)?.payload ||
@@ -287,16 +300,18 @@ export async function cloudSave(
       });
       fail(r.error);
     }
-  for (const p of next.profiles)
-    if (
-      JSON.stringify(previous.profiles.find((o) => o.id === p.id)) !==
-      JSON.stringify(p)
-    ) {
-      const r = await supabase
-        .from("rxm_profiles")
-        .upsert({ id: p.id, payload: p });
-      fail(r.error);
-    }
+  const importing = next.datasets.some(d => !previous.datasets.some(old => old.id === d.id));
+  const changedProfiles = next.profiles.filter(p => JSON.stringify(previous.profiles.find(old => old.id === p.id)) !== JSON.stringify(p));
+  const storedIds = new Set(previous.persistedProfileIds || previous.profiles.map(p => p.id));
+  const missing = next.profiles.filter(p => !storedIds.has(p.id) && (importing || changedProfiles.some(c => c.id === p.id)));
+  if (missing.length) {
+    const result = await supabase.rpc("rxm_add_brand_profiles", { profiles: missing });
+    fail(result.error);
+  }
+  for (const p of changedProfiles.filter(p => storedIds.has(p.id))) {
+    const result = await supabase.from("rxm_profiles").update({ payload: p }).eq("id", p.id);
+    fail(result.error);
+  }
   if (JSON.stringify(next.settings) !== JSON.stringify(previous.settings)) {
     const r = await supabase
       .from("rxm_settings")
@@ -316,4 +331,8 @@ export async function cloudSave(
       });
       fail(r.error);
     }
+  if (importing || changedProfiles.length) {
+    const profiles = await cloudProfiles();
+    return { profiles: reconcileBrandPairs(profiles, next.datasets), persistedProfileIds: profiles.map(p => p.id) };
+  }
 }

@@ -2474,3 +2474,9 @@ textarea {
   .account-identity { font-size:10px; }
   .account-identity small { color:#b9f2df; font-size:9px; }
 }
+
+.brand-library-toolbar { padding:18px 22px; display:flex; flex-wrap:wrap; gap:14px; align-items:center; }
+.brand-library-search { display:flex; flex:1; gap:8px; align-items:center; min-width:240px; }
+.brand-library-search .search { flex:1; width:auto; }
+.brand-search-count { flex-basis:100%; margin:0; font-size:11px; }
+@media(max-width:600px) { .brand-library-toolbar { padding:16px; } .brand-library-search { min-width:0; flex-basis:100%; flex-wrap:wrap; } .brand-library-search .search { min-width:140px; } }

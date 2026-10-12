@@ -16,6 +16,7 @@ test("Postgres schema enforces verified team membership, private settings and ov
     );
     await db.exec(await readFile(new URL("../supabase/username-auth.sql", import.meta.url), "utf8"));
     await db.exec(await readFile(new URL("../supabase/admin-reporting.sql", import.meta.url), "utf8"));
+    await db.exec(await readFile(new URL("../supabase/brand-catalogue.sql", import.meta.url), "utf8"));
     const owner = "11111111-1111-4111-8111-111111111111",
       member = "22222222-2222-4222-8222-222222222222",
       outsider = "33333333-3333-4333-8333-333333333333";
@@ -49,6 +50,12 @@ test("Postgres schema enforces verified team membership, private settings and ov
       await db.exec(
         `insert into public.rxm_datasets(id,name,hash,from_date,to_date,imported_at,payload) values('${id}','Test','${id}','2026-06-01','2026-06-30',now(),'{}');insert into public.rxm_fact_chunks(dataset_id,month,generic,payload) values('${id}','2026-06','KETOTIFEN','[{"count":1}]');`,
       );
+    const oldTofen = (await db.query<{ payload: unknown }>("select payload from public.rxm_profiles where id='tofen'")).rows[0].payload;
+    await db.query(`update public.rxm_datasets set payload=$1 where id='${first}'`,[JSON.stringify({ catalog: [
+      { id:"discovered", brand:"NEWBEX", generic:"Example", company:"Beximco Pharmaceuticals PLC", forms:["TAB"] },
+      { id:"source-tofen", brand:"TOFEN", generic:"Ketotifen", company:"BEXIMCO", forms:["EYE DROP"] },
+      { id:"competitor", brand:"FENAT", generic:"Ketotifen", company:"Competitor", forms:["TAB"] },
+    ] })]);
     await db.query(`select public.rxm_finish_import('${first}')`);
     await assert.rejects(
       db.query(`select public.rxm_finish_import('${second}')`),
@@ -65,12 +72,23 @@ test("Postgres schema enforces verified team membership, private settings and ov
       ).rows[0].id,
       second,
     );
+    assert.equal((await db.query("select * from public.rxm_profiles where payload->>'brand'='NEWBEX'")).rows.length,1,"Successful imports automatically add new Beximco pairs");
+    assert.equal((await db.query("select * from public.rxm_profiles where payload->>'brand'='FENAT'")).rows.length,0,"Competitor pairs are excluded");
+    assert.deepEqual((await db.query<{ payload: unknown }>("select payload from public.rxm_profiles where id='tofen'")).rows[0].payload,oldTofen);
+    await db.query(`update public.rxm_datasets set payload=$1 where id='${second}'`,[JSON.stringify({ catalog:[{ id:"later",brand:"LATERBEX",generic:"New generic",company:"BEXIMCO",forms:["SYP"] }] })]);
+    assert.equal((await db.query<{ added: number }>("select public.rxm_refresh_catalogue() as added")).rows[0].added,1);
+    assert.equal((await db.query<{ added: number }>("select public.rxm_refresh_catalogue() as added")).rows[0].added,0,"Manual refresh is idempotent");
+    await db.query("select public.rxm_add_brand_profiles($1)",[JSON.stringify([{id:"same-pair-other-id",brand:" laterbex ",generic:"new  generic",forms:["TAB"]}])]);
+    assert.equal((await db.query("select * from public.rxm_profiles where id='same-pair-other-id'")).rows.length,0,"Normalized duplicates never overwrite existing definitions");
+    assert.deepEqual((await db.query<{ payload: unknown }>("select payload from public.rxm_profiles where id='later'")).rows[0].payload,{id:"later",brand:"LATERBEX",generic:"New generic",company:"BEXIMCO",forms:["SYP"]});
     const hierarchy = "66666666-6666-4666-8666-666666666666";
     await db.exec(`insert into public.rxm_hierarchies(id,effective_from,created_at,payload) values('${hierarchy}','2026-01-01',now(),'{"name":"Test hierarchy"}');insert into public.rxm_batches values('99999999-9999-4999-8999-999999999999','${owner}',now(),'{"sourceIds":["${first}"],"mails":[{"html":"Frozen"}]}')`);
     assert.equal((await db.query<{ result: { name: string } }>(`select public.rxm_export_hierarchy('${hierarchy}') as result`)).rows[0].result.name, "Test hierarchy");
     const editor = "77777777-7777-4777-8777-777777777777";
     await db.exec(`reset role;insert into auth.users(id,email,email_confirmed_at) values('${editor}','editor@example.com',now());insert into public.rxm_members values('editor@example.com','editor',now());insert into public.rxm_accounts(user_id,username,display_name,login_email,password_salt) values('${editor}','EDITOR','Editor','editor@example.com',repeat('e',64))`);
     await identity(editor,"editor@example.com");
+    await assert.rejects(db.query("select public.rxm_refresh_catalogue()"),/Admin access required/);
+    await assert.rejects(db.query("select rxm_private.add_profiles('[]')"),/permission denied/);
     assert.equal((await db.query(`delete from public.rxm_datasets where id='${second}' returning id`)).rows.length,0,"Editors cannot delete library sources");
     assert.equal((await db.query(`delete from public.rxm_fact_chunks where dataset_id='${second}' returning id`)).rows.length,0,"Editors cannot delete completed source chunks");
     await assert.rejects(db.exec(`update public.rxm_datasets set complete=false where id='${second}'`),/permission denied/);
@@ -91,6 +109,8 @@ test("Postgres schema enforces verified team membership, private settings and ov
     assert.equal((await db.query(`select * from public.rxm_batches`)).rows.length,1,"Source deletion preserves frozen history");
     assert.equal((await db.query(`select * from public.rxm_fact_chunks where dataset_id='${first}'`)).rows.length,0,"Deleting metadata removes its chunks");
     await identity(member, "team@example.com");
+    await assert.rejects(db.query("select public.rxm_refresh_catalogue()"),/Admin access required/);
+    await assert.rejects(db.query("select public.rxm_add_brand_profiles('[]')"),/Brand editing access required/);
     assert.equal((await db.query<{ payload: { subject: string } }>("select payload from public.rxm_workspace_defaults")).rows[0].payload.subject,"Team default");
     await assert.rejects(db.query(`select public.rxm_export_hierarchy('${hierarchy}')`),/Admin access required/);
     assert.equal((await db.query(`delete from public.rxm_datasets where id='${second}' returning id`)).rows.length,0);

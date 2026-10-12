@@ -40,6 +40,7 @@ export interface Dataset {
   aseByMpe?: Record<Structure, Record<string, string>>;
 }
 export interface BrandProfile {
+  company?: string;
   id: string;
   generic: string;
   brand: string;
@@ -160,6 +161,7 @@ export interface Batch {
   doctorSelection?: DoctorSelection;
 }
 export interface Workspace {
+  persistedProfileIds?: string[];
   sharedEmailTemplate?: EmailTemplate;
   datasets: Dataset[];
   hierarchies: Hierarchy[];

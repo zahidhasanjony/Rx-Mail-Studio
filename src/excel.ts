@@ -1,5 +1,6 @@
 import { Unzip, UnzipInflate } from "fflate";
 import { SaxesParser } from "saxes";
+import { isBeximcoCompany } from "./catalogue";
 import { normalize } from "./engine";
 import type { BrandProfile, Dataset, HierarchyRow, Contact, RxFact } from "./types";
 export interface Sheet {
@@ -350,11 +351,11 @@ export async function importRx(
             previous.sourceRows.push(line);
           } else facts.set(key, f);
         }
-        if (/BEXIMCO/i.test(f.company)) {
+        if (isBeximcoCompany(f.company)) {
           const ck = JSON.stringify([f.generic, f.brand]);
           let p = catalog.get(ck);
           if (!p) {
-            p = { id: ck, generic: f.generic, brand: f.brand, forms: [] };
+            p = { id: ck, generic: f.generic, brand: f.brand, forms: [], company: f.company };
             catalog.set(ck, p);
           }
           if (f.form && !p.forms.includes(f.form)) p.forms.push(f.form);

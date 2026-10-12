@@ -73,6 +73,7 @@ import {
   cloudLoad,
   cloudHydrate,
   cloudSave,
+  cloudUpdateCatalogue,
   cloudPublishEmailTemplate,
   cloudDeleteSource,
   cloudExportHierarchy,
@@ -88,6 +89,7 @@ import { download, outlookPackage, mailEml, emlFilename, emlPackage, emlPackageF
 import { hierarchyColumns, mapHierarchy, extraHierarchyCcMappings } from "./excel";
 import type { Sheet, HierarchyCcMapping } from "./excel";
 import { parseCsv } from "./csv";
+import { appendBrandPairs, reconcileBrandPairs, sourceBrandPairs, brandPairKey, searchBrandPairs } from "./catalogue";
 import { reportingMonths, reportingPeriod } from "./reporting";
 import { demoWorkspace } from "./demo";
 import {
@@ -449,6 +451,8 @@ export default function App() {
     [toast, setToast] = useState<{ text: string; error?: boolean } | null>(
       null,
     );
+  const [brandSearch, setBrandSearch] = useState(""), [brandSearchDraft, setBrandSearchDraft] = useState("");
+  const selectedBrand = useRef<BrandProfile>(starterProfiles[0]);
   const [month, setMonth] = useState("2026-06"),
     [endMonth, setEndMonth] = useState("2026-06"),
     [structure, setStructure] = useState<"ACD" | "CCD" | "Both">("ACD"),
@@ -597,8 +601,11 @@ export default function App() {
   useEffect(() => {
     if (page === "users" && (mode !== "cloud" || account?.role !== "owner")) setPage("settings");
   }, [page, mode, account?.role]);
-  const profile =
-    workspace.profiles.find((p) => p.id === profileId) || workspace.profiles[0];
+  const profile = workspace.profiles.find(p => p.id === profileId) || workspace.profiles.find(p => brandPairKey(p) === brandPairKey(selectedBrand.current)) || workspace.profiles[0];
+  useEffect(() => {
+    if (profile) { selectedBrand.current = profile; if (profileId !== profile.id) setProfileId(profile.id); }
+  }, [profile, profileId]);
+  const visibleBrandPairs = searchBrandPairs(workspace.profiles, brandSearch);
   const marketProfile = useMemo(() => profile ? {
     ...profile, forms: dosageForm === "all" || !profile.forms.includes(dosageForm) ? profile.forms : [dosageForm],
   } : undefined, [profile, dosageForm]);
@@ -746,8 +753,10 @@ export default function App() {
     setBusyText("Saving workspace");
     try {
       if (mode === "local") await localSave(next);
-      if (mode === "cloud")
-        await cloudSave(next, workspaceRef.current, setBusyText);
+      if (mode === "cloud") {
+        const catalogue = await cloudSave(next, workspaceRef.current, setBusyText);
+        if (catalogue) next = { ...next, ...catalogue };
+      }
       workspaceRef.current = next;
       setWorkspace(next);
       return true;
@@ -995,15 +1004,7 @@ export default function App() {
     const datasets = workspace.datasets.map((o) =>
       conflicts.some((c) => c.id === o.id) ? { ...o, active: false } : o,
     );
-    const profiles = [...workspace.profiles];
-    for (const p of d.catalog) {
-      const existing = profiles.find(
-        (o) =>
-          normalize(o.brand) === normalize(p.brand) &&
-          normalize(o.generic) === normalize(p.generic),
-      );
-      if (!existing) profiles.push(p);
-    }
+    const profiles = appendBrandPairs(workspace.profiles, sourceBrandPairs([d]));
     const next = { ...workspace, datasets: [...datasets, d], profiles };
     if (await update(next)) {
       setPendingSource(null);
@@ -1210,6 +1211,16 @@ export default function App() {
   }
   function openAdminPage(target: Page) {
     setAdminPanel(false); setMobileNav(false); setPage(target);
+  }
+  async function refreshBrandCatalogue() {
+    if (!isAdmin) { notify("Admin access required", true); return; }
+    setBusy(true); setBusyText("Checking imported Beximco catalogues");
+    try {
+      const result = await cloudUpdateCatalogue();
+      const next = { ...workspaceRef.current, profiles: reconcileBrandPairs(result.profiles, workspaceRef.current.datasets), persistedProfileIds: result.profiles.map(p => p.id) };
+      workspaceRef.current = next; setWorkspace(next);
+      notify(result.added ? `${result.added} new Beximco brand pair${result.added === 1 ? "" : "s"} added. Existing pairs kept unchanged.` : "No new Beximco pairs found.");
+    } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
   }
   async function importResults(file: File | undefined) {
     if (!file) return;
@@ -2117,8 +2128,18 @@ export default function App() {
                   files. Review dosage forms before generating emails.
                 </span>
               </div>
+              <div className="card brand-library-toolbar">
+                <form onSubmit={e => { e.preventDefault(); setBrandSearch(brandSearchDraft); }} className="brand-library-search" role="search" aria-label="Brand Library search">
+                  <div className="search"><Search size={16} /><input aria-label="Search Brand Library" placeholder="Search brand or generic" value={brandSearchDraft} onChange={e => setBrandSearchDraft(e.target.value)} /></div>
+                  <Button type="submit" variant="secondary">Search</Button>
+                  {brandSearch && <Button variant="text" onClick={() => { setBrandSearch(""); setBrandSearchDraft(""); }}>Clear</Button>}
+                </form>
+                {isAdmin && <Button variant="secondary" disabled={busy} onClick={refreshBrandCatalogue}><RefreshCw size={16} />Update catalogue</Button>}
+                <p className="muted brand-search-count">{visibleBrandPairs.length} of {workspace.profiles.length} brand pairs</p>
+              </div>
+              {!visibleBrandPairs.length && <Empty icon={Search} title="No matching brand pairs" text="Try a brand name or generic, or clear your search." />}
               <div className="brand-grid">
-                {workspace.profiles
+                {visibleBrandPairs
                   .slice()
                   .sort(
                     (a, b) =>
@@ -2527,7 +2548,7 @@ export default function App() {
                                 ),
                             ),
                           ],
-                          profiles: workspace.profiles,
+                          profiles: appendBrandPairs(existing.profiles, workspace.profiles),
                           settings: { ...workspace.settings, emailTemplate: existing.settings.emailTemplate },
                           batches: [
                             ...workspace.batches,
@@ -2537,8 +2558,8 @@ export default function App() {
                             ),
                           ],
                         };
-                        await cloudSave(next, existing, setBusyText);
-                        setWorkspace(next);
+                        const catalogue = await cloudSave(next, existing, setBusyText);
+                        setWorkspace(catalogue ? { ...next, ...catalogue } : next);
                         setMode("cloud");
                         notify("Device workspace copied to cloud");
                       } catch (e) {
@@ -3271,6 +3292,7 @@ export default function App() {
                   forms: brandEdit.forms.map(normalize).filter(Boolean),
                   aliases: brandEdit.aliases?.filter(Boolean),
                 };
+                if (workspace.profiles.some(o => o.id !== p.id && brandPairKey(o) === brandPairKey(p))) { notify("This brand and generic pair already exists. Edit its existing entry.", true); return; }
                 const exists = workspace.profiles.some((o) => o.id === p.id);
                 if (
                   await update({

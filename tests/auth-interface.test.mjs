@@ -29,6 +29,7 @@ test("compiled login restores cloud sessions, exposes admin shortcuts and signs 
       const accounts = [account];
       const sample = demoWorkspace();
       const sourceRows = sample.datasets.map(d => ({ id: d.id, active: d.active, complete: true, payload: d }));
+      const profileRows = [{ id: "cloud-only", payload: { id: "cloud-only", brand: "CLOUD ONLY", generic: "Example Generic", forms: ["TAB"] } }];
       const requests = [];
       let sharedTemplate = { ...defaultEmailTemplate };
 
@@ -51,6 +52,12 @@ test("compiled login restores cloud sessions, exposes admin shortcuts and signs 
           if (url.pathname.endsWith("/rxm_datasets")) {
             if (options?.method === "DELETE") return response([{ id: sourceRows.pop().id }]);
             return response(sourceRows);
+          }
+          if (url.pathname.endsWith("/rxm_profiles")) return response(profileRows);
+          if (url.pathname.endsWith("/rxm_refresh_catalogue")) {
+            if (profileRows.some(p => p.id === "manual-new")) return response(0);
+            profileRows.push({ id: "manual-new", payload: { id: "manual-new", brand: "NEWBEX", generic: "New Generic", company: "BEXIMCO", forms: ["TAB"] } });
+            return response(1);
           }
           if (url.pathname.endsWith("/rxm_hierarchies")) return response(sample.hierarchies.map(h => ({ payload: h })));
           if (url.pathname.endsWith("/rxm_fact_chunks")) return response(sample.datasets.map(d => ({ dataset_id: d.id, payload: d.facts })));
@@ -103,6 +110,23 @@ test("compiled login restores cloud sessions, exposes admin shortcuts and signs 
           hierarchyShortcut.click();
           await waitFor(() => button("Create version"));
           assert.ok(!w.document.querySelector('[aria-label="Admin controls"]'));
+        }
+        button("Brand library").click();
+        await waitFor(() => w.document.querySelector('.brand-card h2') && w.document.body.textContent.includes('TOFEN'));
+        for (const brand of ["TOFEN","BILLI","MONOCAST","ATRIZIN","AXODIN","BEXIDAL","DUVENT","NASAL","CLOUD ONLY"])
+          assert.ok([...w.document.querySelectorAll('.brand-card h2')].some(h => h.textContent === brand),brand+" survives partial cloud loading");
+        const search = w.document.querySelector('[aria-label="Search Brand Library"]');
+        fill(search,'ketotifen'); w.document.querySelector('.brand-library-search').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+        await waitFor(() => w.document.querySelectorAll('.brand-card').length === 1);
+        assert.equal(w.document.querySelector('.brand-card h2').textContent,'TOFEN');
+        button("Clear").click(); await waitFor(() => w.document.querySelectorAll('.brand-card').length === 9);
+        assert.equal(!!button("Update catalogue"),role === "owner");
+        if (role === "owner") {
+          button("Update catalogue").click();
+          await waitFor(() => [...w.document.querySelectorAll('.brand-card h2')].some(h => h.textContent === 'NEWBEX'));
+          button("Update catalogue").click();
+          await waitFor(() => w.document.body.textContent.includes('No new Beximco pairs found'));
+          assert.equal(w.document.querySelectorAll('.brand-card').length,10);
         }
         button("Settings").click();
         await waitFor(() => w.document.body.textContent.includes("Team default email wording"));
