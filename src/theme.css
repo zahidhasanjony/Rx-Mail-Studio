@@ -259,3 +259,7 @@ input::placeholder, textarea::placeholder { color: #6f8194; }
 }
 
 .signature-preview { padding:20px; margin:16px 0 24px; border:1px solid var(--border); border-radius:10px; background:white; overflow-wrap:anywhere; }
+.doctor-limit-field { grid-column:span 2; min-width:0; }
+.doctor-limit-control { display:flex; gap:8px; }
+.doctor-limit-control select { flex:1; min-width:0; }
+.doctor-limit-control input { width:90px; max-width:40%; }

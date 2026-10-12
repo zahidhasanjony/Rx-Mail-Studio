@@ -21,11 +21,11 @@ export default function RegionReview({ report, brand, recipient, national, block
       </div>
       <p className={national.available && below ? "below-note" : "review-note"}>{national.available ? `${below} of ${report.doctors.length} prescriber entries below national` : "National benchmark unavailable"}</p>
       <div className="review-shares" aria-label="Regional brand shares">{report.shares.map((b, i) => <div className={`share-tile share-${i}`} key={b.brand}><span>{b.brand}</span><strong>{report.total ? b.share.toFixed(1) + "%" : "—"}</strong></div>)}</div>
-      <table className="review-table"><thead><tr><th>Doctor code</th><th>{brand} share</th></tr></thead><tbody>{report.doctors.slice(0, 5).map(d => {
+      <table className="review-table"><thead><tr><th>Doctor code</th><th>Doctor name</th><th>{brand} share</th></tr></thead><tbody>{report.doctors.slice(0, 5).map(d => {
         const flag = belowNational(d, national);
-        return <tr key={JSON.stringify([d.mpe, d.code])} className={flag ? "below-national" : ""}><td>{d.code}</td><td>{flag && <ArrowDown size={13} aria-label="Below national" />}{d.genericCount ? (d.ownCount / d.genericCount * 100).toFixed(1) + "%" : "N/A"}</td></tr>;
+        return <tr key={JSON.stringify([d.mpe, d.code])} className={flag ? "below-national" : ""}><td>{d.code}</td><td>{d.name || "—"}</td><td>{flag && <ArrowDown size={13} aria-label="Below national" />}{d.genericCount ? (d.ownCount / d.genericCount * 100).toFixed(1) + "%" : "N/A"}</td></tr>;
       })}</tbody></table>
-      {!report.doctors.length && <p className="review-note">No Rx records in this region.</p>}
+      {!report.doctors.length && <p className="review-note">{report.total ? "No doctors match the selected report options." : "No Rx records in this region."}</p>}
       {report.doctors.length > 5 && <p className="review-note">Showing 5 of {report.doctors.length} entries</p>}
       {blocked && <p className="review-note">{blocked}</p>}
       <button className="button" disabled={!!blocked} onClick={onPreview}>Review email <ArrowRight size={16} /></button>

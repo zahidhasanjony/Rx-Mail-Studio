@@ -62,6 +62,8 @@ import {
   nationalRxShare,
   belowNational,
   emailSignature,
+  reportSpecialties,
+  selectReportDoctors,
 } from "./engine";
 import {
   cloudConfigured,
@@ -448,6 +450,9 @@ export default function App() {
     [period, setPeriod] = useState("all"),
     [profileId, setProfileId] = useState("tofen"),
     [dosageForm, setDosageForm] = useState("all"),
+    [specialty, setSpecialty] = useState(""),
+    [doctorMode, setDoctorMode] = useState<"all" | "top">("all"),
+    [doctorLimit, setDoctorLimit] = useState("10"),
     [reviewRegion, setReviewRegion] = useState(""),
     [compactPreview, setCompactPreview] = useState(() => window.innerWidth <= 740),
     [search, setSearch] = useState(""),
@@ -616,13 +621,22 @@ export default function App() {
     [workspace.datasets, month, marketProfile, structure, period],
   );
   const national = useMemo(() => marketProfile
-    ? nationalRxShare(workspace.datasets, month, marketProfile, period, currentHierarchy?.rows)
+    ? nationalRxShare(workspace.datasets, month, marketProfile, period)
     : { total: 0, own: 0, share: null, available: false, reason: "Choose a brand / generic." },
-    [workspace.datasets, month, marketProfile, period, currentHierarchy]);
+    [workspace.datasets, month, marketProfile, period]);
+  const specialtyOptions = useMemo(() => reportSpecialties(reportList), [reportList]);
+  const chosenSpecialty = specialtyOptions.some(s => s.value === specialty) ? specialty : "";
+  const doctorLimitValue = doctorMode === "top" ? Number(doctorLimit) : undefined;
+  const doctorSelectionValid = doctorLimitValue === undefined || (Number.isSafeInteger(doctorLimitValue) && doctorLimitValue > 0);
+  const doctorSelection = { specialty: chosenSpecialty || undefined, limit: doctorSelectionValid ? doctorLimitValue : undefined };
+  const doctorReports = useMemo(() => reportList.map(r => selectReportDoctors(r, {
+    specialty: chosenSpecialty || undefined,
+    limit: doctorSelectionValid ? doctorLimitValue : undefined,
+  })), [reportList, chosenSpecialty, doctorLimitValue, doctorSelectionValid]);
   const queue = useMemo(
     () =>
       regionalQueue(
-        reportList,
+        doctorReports,
         activeSources,
         currentHierarchy,
         structure === "Both" ? ["ACD", "CCD"] : [structure],
@@ -647,7 +661,7 @@ export default function App() {
         ),
       ),
     [
-      reportList,
+      doctorReports,
       currentHierarchy,
       structure,
       activeSources.length,
@@ -679,6 +693,7 @@ export default function App() {
   const review = queue.find(q => key(q.report) === reviewRegion) || validQueue[0] || queue[0];
   const previewRegional = (report: RegionReport) => {
     if (!marketProfile) return;
+    if (!doctorSelectionValid) { notify("Enter a positive whole number of doctors.", true); return; }
     try {
       const m = makeMail(report, marketProfile, month + " · " + periodText, currentHierarchy, workspace.settings, national);
       setPreview({ html: m.html, title: m.subject, mail: m, sender: { name: workspace.settings.name, email: workspace.settings.email } });
@@ -967,6 +982,7 @@ export default function App() {
   }
   async function generate() {
     if (!marketProfile) return;
+    if (!doctorSelectionValid) { notify("Enter a positive whole number of doctors.", true); return; }
     const chosen = validQueue.filter((q) => selected.has(key(q.report)));
     if (!chosen.length) {
       notify("Select at least one region with a valid recipient.", true);
@@ -995,6 +1011,7 @@ export default function App() {
         settings: structuredClone(workspace.settings),
         profile: structuredClone(marketProfile),
         national: structuredClone(national),
+        doctorSelection: structuredClone(doctorSelection),
         mails,
       };
       if (
@@ -1420,6 +1437,23 @@ export default function App() {
                       {profile?.forms.map(form => <option key={form} value={form}>{form}</option>)}
                     </select>
                   </Field>
+                  <Field label="Specialty">
+                    <select value={chosenSpecialty} onChange={e => setSpecialty(e.target.value)} aria-label="Specialty">
+                      <option value="">All specialties</option>
+                      {specialtyOptions.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                    </select>
+                  </Field>
+                  <div className="doctor-limit-field">
+                    <Field label="Doctors per region" hint={doctorSelectionValid ? "MPE first, then highest generic Rx. Limit applies after specialty filtering." : "Enter a positive whole number."}>
+                      <div className="doctor-limit-control">
+                        <select value={doctorMode} onChange={e => setDoctorMode(e.target.value as "all" | "top")} aria-label="Doctor selection">
+                          <option value="all">All doctors</option>
+                          <option value="top">Top</option>
+                        </select>
+                        {doctorMode === "top" && <input type="number" min="1" step="1" value={doctorLimit} onChange={e => setDoctorLimit(e.target.value)} aria-label="Number of doctors" aria-invalid={!doctorSelectionValid} />}
+                      </div>
+                    </Field>
+                  </div>
                 </div>
                 <div className="filter-footer">
                   <span>
@@ -1444,7 +1478,7 @@ export default function App() {
               <div className="stats">
                 <div className="stat stat-teal"><div className="stat-icon"><Mail size={21} /></div><div><span>Emails ready</span><strong>{num(validQueue.length)}</strong><small>{structure === "Both" ? "ACD + CCD" : structure}</small></div></div>
                 <div className="stat stat-blue"><div className="stat-icon"><FlaskConical size={21} /></div><div><span>National {profile?.brand} share</span><strong>{!loading && national.available && national.share !== null ? national.share.toFixed(1) + "%" : "N/A"}</strong><small>Same market and period</small></div></div>
-                <div className="stat stat-violet"><div className="stat-icon"><Users size={21} /></div><div><span>Doctor review</span><strong>{national.available ? num(reportList.reduce((n, r) => n + r.doctors.filter(d => belowNational(d, national)).length, 0)) : "—"}</strong><small>Entries below national</small></div></div>
+                <div className="stat stat-violet"><div className="stat-icon"><Users size={21} /></div><div><span>Doctor review</span><strong>{national.available ? num(doctorReports.reduce((n, r) => n + r.doctors.filter(d => belowNational(d, national)).length, 0)) : "—"}</strong><small>Entries below national</small></div></div>
               </div>
               {!loading && activeSources.length > 0 && !national.available && <div className="notice benchmark-notice"><AlertCircle size={17} /><span>National benchmark unavailable. {national.reason} Doctor rows will remain unmarked.</span></div>}
               <div className="generation-layout">
@@ -1595,7 +1629,7 @@ export default function App() {
                             <td>
                               <button
                                 className="icon-button"
-                                disabled={!!q.error}
+                                disabled={!!q.error || !doctorSelectionValid}
                                 aria-label={`Preview ${q.report.region} email`}
                                 onClick={() => previewRegional(q.report)}
                               >
@@ -1634,7 +1668,7 @@ export default function App() {
                     {selected.size} selected · .eml ZIP, manual sending
                   </span>
                   <Button
-                    disabled={busy || loading || !selected.size}
+                    disabled={busy || loading || !selected.size || !doctorSelectionValid}
                     onClick={generate}
                   >
                     <Mail size={17} />
@@ -1643,7 +1677,7 @@ export default function App() {
                   </Button>
                 </div>
               </section>
-              <RegionReview report={review?.report} brand={profile?.brand || ""} recipient={review?.row?.rseName} national={national} blocked={review?.error} onPreview={() => review && previewRegional(review.report)} />
+              <RegionReview report={review?.report} brand={profile?.brand || ""} recipient={review?.row?.rseName} national={national} blocked={review?.error || (!doctorSelectionValid ? "Enter a positive whole number of doctors." : undefined)} onPreview={() => review && previewRegional(review.report)} />
               </div>
               <div className="help-line">
                 <span>

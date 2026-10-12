@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { belowNational, nationalRxShare, reports, makeMail, emailHtml, emailSignature } from "../src/engine.ts";
+import { belowNational, nationalRxShare, reports, makeMail, emailHtml, emailSignature, regionalQueue } from "../src/engine.ts";
 import { defaultSettings, starterProfiles } from "../src/types.ts";
 import { JSDOM } from "jsdom";
 const profile = starterProfiles[0];
@@ -44,10 +44,13 @@ test("strict below comparison includes zero own Rx, excludes equality and missin
   assert.equal(belowNational({ ownCount: 0, genericCount: 0 }, n), false);
   assert.equal(belowNational({ ownCount: 1, genericCount: 100 }, { ...n, available: false, share: null }), false);
 });
-test("missing national route coverage, empty markets and overlapping source dates do not produce a misleading benchmark", () => {
+test("hierarchy routes absent from the source do not disable source-wide national share or bypass regional coverage checks", () => {
   const ds = source([fact("TOFEN", 32), fact("FENAT", 68)]);
-  const missing = nationalRxShare([ds], "2026-08", profile, "first", [...hierarchy.rows, { structure: "ACD", region: "R2", active: true }]);
-  assert.equal(missing.available, false); assert.equal(missing.share, null); assert.match(missing.reason, /no source coverage/);
+  const extraRoutes = [...hierarchy.rows, { ...hierarchy.rows[0], structure: "CCD", region: "O5", active: true }, { ...hierarchy.rows[0], structure: "CCD", region: "O6", active: true }];
+  const benchmark = nationalRxShare([ds], "2026-08", profile, "first", extraRoutes);
+  assert.equal(benchmark.available, true); assert.equal(benchmark.share, 32);
+  const queue = regionalQueue(reports([ds], "2026-08", profile, ["ACD", "CCD"], "first"), [ds], { ...hierarchy, rows: extraRoutes }, ["ACD", "CCD"], profile.brand, true, ["2026-08-05"]);
+  assert.ok(queue.filter(q => ["O5", "O6"].includes(q.report.region)).every(q => q.error === "No regional source coverage"));
   assert.equal(nationalRxShare([ds, { ...ds, id: "duplicate" }], "2026-08", profile).available, false);
   assert.equal(nationalRxShare([source([])], "2026-08", profile).share, null);
   const coveredZero = source([fact("TOFEN", 32), fact("FENAT", 68)], { regions: { ACD: ["R1", "R2"], CCD: ["C1"] }, regionDates: { ACD: { R1: ["2026-08-05"], R2: ["2026-08-05"] }, CCD: { C1: ["2026-08-05"] } } });
@@ -67,6 +70,8 @@ test("clean email has five centered brand cells, doctor codes, exact red rows an
   assert.equal(doc.querySelector('table[role="presentation"]').querySelectorAll("td").length, 5);
   const table = doc.querySelector('table[aria-label="Prescriber list"]');
   assert.equal(table.querySelectorAll('tr[data-below-national="true"]').length, 2);
+  assert.ok([...table.querySelectorAll("th")].some(h => h.textContent === "Doctor name"));
+  assert.equal(table.querySelector("tbody tr").children[2].textContent, "Example doctor");
   assert.ok([...table.querySelectorAll("th,td")].every(c => c.getAttribute("style")?.includes("text-align:center;vertical-align:middle")));
   assert.deepEqual([...table.querySelectorAll('tr[data-below-national="true"]')].map(r => r.children[1].textContent), ["D1", "D4"]);
   assert.equal(doc.querySelector('[data-national-comparison]').textContent,

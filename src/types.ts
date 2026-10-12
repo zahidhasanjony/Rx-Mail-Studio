@@ -85,6 +85,10 @@ export interface DoctorRow {
   ownCount: number;
   otherBrands: Record<string, number>;
 }
+export interface DoctorSelection {
+  specialty?: string;
+  limit?: number;
+}
 export interface NationalRxShare {
   total: number;
   own: number;
@@ -130,6 +134,7 @@ export interface Batch {
   profile: BrandProfile;
   mails: Mail[];
   national?: NationalRxShare;
+  doctorSelection?: DoctorSelection;
 }
 export interface Workspace {
   datasets: Dataset[];

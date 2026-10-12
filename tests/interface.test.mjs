@@ -75,6 +75,8 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
       /Regional Rx share/,
     );
     assert.match(w.document.querySelector("iframe").srcdoc, /Prescriber list/);
+    assert.match(w.document.querySelector("iframe").srcdoc, /Doctor name/);
+    assert.match(w.document.querySelector("iframe").srcdoc, />Sample Doctor 1<\/td>/);
     button("Download .eml").click();
     assert.equal(downloads.length, 1);
     assert.ok(downloads[0].name.endsWith(".eml"));
@@ -116,6 +118,46 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
     w.document.querySelector('[aria-label="Download TOFEN 2026-06 .eml ZIP"]').click();
     assert.equal(downloads.length, 4);
     assert.match(w.document.querySelector(".batch-list").textContent, /0 opened/);
+    [...w.document.querySelectorAll(".sidebar nav button")].find(b => b.querySelector("span")?.textContent === "Generate emails").click();
+    await waitFor(() => w.document.querySelector('[aria-label="Specialty"]'));
+    const specialty = w.document.querySelector('[aria-label="Specialty"]');
+    specialty.value = "MEDICINE";
+    specialty.dispatchEvent(new w.Event("change", { bubbles: true }));
+    await waitFor(() => w.document.querySelectorAll(".review-table tbody tr").length === 2);
+    const selection = w.document.querySelector('[aria-label="Doctor selection"]');
+    selection.value = "top";
+    selection.dispatchEvent(new w.Event("change", { bubbles: true }));
+    await waitFor(() => w.document.querySelector('[aria-label="Number of doctors"]'));
+    const limit = w.document.querySelector('[aria-label="Number of doctors"]');
+    const setLimit = value => {
+      Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, "value").set.call(limit, value);
+      limit.dispatchEvent(new w.Event("input", { bubbles: true }));
+    };
+    setLimit("0");
+    await waitFor(() => button("Generate 6 emails")?.disabled);
+    setLimit("1");
+    await waitFor(() => w.document.querySelectorAll(".review-table tbody tr").length === 1 && !button("Generate 6 emails")?.disabled);
+    w.document.querySelector('[aria-label="Preview D5 email"]').click();
+    await waitFor(() => w.document.querySelector("iframe"));
+    const selectedMail = new JSDOM(w.document.querySelector("iframe").srcdoc).window.document;
+    assert.equal(selectedMail.querySelectorAll('table[aria-label="Prescriber list"] tbody tr').length, 1);
+    assert.equal(selectedMail.querySelector('table[aria-label="Prescriber list"] tbody tr').children[2].textContent, "Sample Doctor 1");
+    assert.match(selectedMail.querySelector('[data-national-comparison]').textContent, /is 22.4% whereas yours is 22.4%/);
+    button("Done").click();
+    await waitFor(() => !w.document.querySelector("iframe"));
+    button("Generate 6 emails").click();
+    await waitFor(() => w.document.querySelector('[aria-label="6 emails prepared"]'));
+    const selectedFiles = unzipSync(new Uint8Array(await downloads.at(-1).blob.arrayBuffer()));
+    for (const [name, bytes] of Object.entries(selectedFiles).filter(([name]) => name.endsWith(".eml"))) {
+      const exported = strFromU8(bytes);
+      const htmlPart = exported.match(/Content-Type: text\/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n([\s\S]*?)\r\n--/)?.[1];
+      assert.ok(htmlPart, "Selected doctor list reaches the .eml batch export");
+      const emailDoc = new JSDOM(Buffer.from(htmlPart, "base64").toString("utf8")).window.document;
+      assert.equal(emailDoc.querySelectorAll('table[aria-label="Prescriber list"] tbody tr').length, 1, name);
+      assert.equal(emailDoc.querySelector('table[aria-label="Prescriber list"] tbody tr').children[2].textContent, "Sample Doctor 1");
+    }
+    button("View history").click();
+    await waitFor(() => w.document.querySelector(".batch-list"));
     button("Settings").click();
     await waitFor(() => button("Connect to cloud"));
     button("Connect to cloud").click();
