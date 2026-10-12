@@ -236,6 +236,11 @@ export async function cloudSave(
         .eq("id", d.id);
       fail(r.error);
     }
+    if (old && JSON.stringify(old.aseByMpe) !== JSON.stringify(d.aseByMpe)) {
+      const { facts, ...payload } = d;
+      const r = await supabase.from("rxm_datasets").update({ payload }).eq("id", d.id);
+      fail(r.error);
+    }
   }
   for (const h of next.hierarchies)
     if (!previous.hierarchies.some((p) => p.id === h.id)) {

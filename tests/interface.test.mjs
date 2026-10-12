@@ -137,12 +137,28 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
     await waitFor(() => button("Generate 6 emails")?.disabled);
     setLimit("1");
     await waitFor(() => w.document.querySelectorAll(".review-table tbody tr").length === 1 && !button("Generate 6 emails")?.disabled);
+    w.document.querySelector("details.email-customization").open = true;
+    const composer = w.document.querySelector(".email-customization");
+    const templateField = label => [...composer.querySelectorAll("label.field")].find(l=>l.querySelector("span")?.textContent===label).querySelector("input,textarea");
+    const setTemplate = async (label,value) => {
+      const field = templateField(label);
+      Object.getOwnPropertyDescriptor(field.tagName==="TEXTAREA" ? w.HTMLTextAreaElement.prototype : w.HTMLInputElement.prototype,"value").set.call(field,value);
+      field.dispatchEvent(new w.Event("input",{bubbles:true}));
+      await new Promise(resolve=>setTimeout(resolve,20));
+    };
+    await setTemplate("Email subject","Review {Brand} for {Region}");
+    await setTemplate("Opening message","Please review {Generic} for {Region}.");
+    await setTemplate("Email body","Team note for {Region}.\n{RegionalShare}\n{ASEShare}\n{MPEShare}\n{Prescribers}\nDiscuss priority doctors.");
     w.document.querySelector('[aria-label="Preview D5 email"]').click();
     await waitFor(() => w.document.querySelector("iframe"));
     const selectedMail = new JSDOM(w.document.querySelector("iframe").srcdoc).window.document;
     assert.equal(selectedMail.querySelectorAll('table[aria-label="Prescriber list"] tbody tr').length, 1);
     assert.equal(selectedMail.querySelector('table[aria-label="Prescriber list"] tbody tr').children[2].textContent, "Sample Doctor 1");
     assert.match(selectedMail.querySelector('[data-national-comparison]').textContent, /is 22.4% whereas yours is 22.4%/);
+    assert.match(w.document.querySelector(".preview-subject").textContent,/Review TOFEN for D5/);
+    assert.match(selectedMail.body.textContent,/Team note for D5/);
+    assert.equal(selectedMail.querySelector('table[aria-label="MPE wise Rx share"]').querySelectorAll('td').length,5,"MPE summary uses all doctors despite Top 1");
+    assert.equal(selectedMail.querySelector('table[aria-label="ASE wise Rx share"]').querySelectorAll('td').length,1);
     button("Done").click();
     await waitFor(() => !w.document.querySelector("iframe"));
     button("Generate 6 emails").click();
@@ -155,6 +171,9 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
       const emailDoc = new JSDOM(Buffer.from(htmlPart, "base64").toString("utf8")).window.document;
       assert.equal(emailDoc.querySelectorAll('table[aria-label="Prescriber list"] tbody tr').length, 1, name);
       assert.equal(emailDoc.querySelector('table[aria-label="Prescriber list"] tbody tr').children[2].textContent, "Sample Doctor 1");
+      assert.match(emailDoc.body.textContent,/Team note for/);
+      assert.ok(emailDoc.querySelector('table[aria-label="ASE wise Rx share"]'));
+      assert.equal(emailDoc.querySelector('table[aria-label="MPE wise Rx share"]').querySelectorAll('td').length,5);
     }
     button("View history").click();
     await waitFor(() => w.document.querySelector(".batch-list"));

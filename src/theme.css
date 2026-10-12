@@ -263,3 +263,12 @@ input::placeholder, textarea::placeholder { color: #6f8194; }
 .doctor-limit-control { display:flex; gap:8px; }
 .doctor-limit-control select { flex:1; min-width:0; }
 .doctor-limit-control input { width:90px; max-width:40%; }
+.email-customization { margin:0 0 20px; }
+.email-customization summary { padding:16px 24px; color:var(--rx-primary); font-size:13px; font-weight:600; cursor:pointer; }
+.email-customization-body { padding:0 24px 20px; }
+.email-template-editor { display:grid; gap:14px; }
+.email-template-editor .text-link { justify-self:start; }
+.template-help { margin:0; color:var(--muted); font-size:11px; line-height:1.7; overflow-wrap:anywhere; }
+.template-error { color:var(--rx-red); margin:0; font-size:12px; }
+.preview-subject { border-top:1px solid var(--border); padding-top:5px; margin-top:5px; }
+@media(max-width:740px){.email-customization summary{padding:16px}.email-customization-body{padding:0 16px 16px}}

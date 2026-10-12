@@ -10,8 +10,10 @@ export interface RxFact {
   specialty: string;
   acdRegion: string;
   acdMpe: string;
+  acdAse?: string;
   ccdRegion: string;
   ccdMpe: string;
+  ccdAse?: string;
   count: number;
   sourceRow: number;
   sourceRows?: number[];
@@ -35,6 +37,7 @@ export interface Dataset {
   regions?: Record<Structure, string[]>;
   regionDates?: Record<Structure, Record<string, string[]>>;
   dates?: string[];
+  aseByMpe?: Record<Structure, Record<string, string>>;
 }
 export interface BrandProfile {
   id: string;
@@ -75,6 +78,22 @@ export interface Settings {
   personalCc: Contact[];
   intro: string;
   closing: string;
+  emailTemplate?: EmailTemplate;
+}
+export interface EmailTemplate {
+  subject: string;
+  opening: string;
+  body: string;
+}
+export const defaultEmailTemplate: EmailTemplate = {
+  subject: "{Generic} Prescriber List · {Structure} {Region} Region · {Period}",
+  opening: "Please find below the prescription share and prescribers list of {Generic} and {Brand} Rx scenario in {Region} Region.",
+  body: "{RegionalShare}\n{ASEShare}\n{MPEShare}\n{Prescribers}",
+};
+export interface TerritoryRxShare {
+  code: string;
+  genericCount: number;
+  ownCount: number;
 }
 export interface DoctorRow {
   mpe: string;
@@ -106,6 +125,8 @@ export interface RegionReport {
   otherCount: number;
   otherShare: number;
   national?: NationalRxShare;
+  aseShares?: TerritoryRxShare[];
+  mpeShares?: TerritoryRxShare[];
 }
 export interface Mail {
   id: string;

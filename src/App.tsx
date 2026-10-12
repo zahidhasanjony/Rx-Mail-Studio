@@ -79,6 +79,8 @@ import { usernameSignIn, currentAccount, AccountServiceError } from "./auth";
 import type { UserAccount } from "./auth";
 import UsersPage from "./UsersPage";
 import RegionReview from "./RegionReview";
+import EmailTemplateEditor from "./EmailTemplateEditor";
+import { emailTemplateFor, templateError } from "./email-template";
 import { download, outlookPackage, mailEml, emlFilename, emlPackage, emlPackageFilename } from "./export";
 import { hierarchyColumns, mapHierarchy } from "./excel";
 import type { Sheet } from "./excel";
@@ -495,6 +497,10 @@ export default function App() {
     } | null>(null),
     [brandEdit, setBrandEdit] = useState<BrandProfile | null>(null),
     [settingsDraft, setSettingsDraft] = useState<Settings>(workspace.settings);
+  const [emailTemplate, setEmailTemplate] = useState(() => emailTemplateFor(workspace.settings));
+  useEffect(() => setEmailTemplate(emailTemplateFor(workspace.settings)), [workspace.settings.emailTemplate]);
+  const compositionError = templateError(emailTemplate);
+  const composeSettings = { ...workspace.settings, emailTemplate };
   const sourceInput = useRef<HTMLInputElement>(null),
     hierarchyInput = useRef<HTMLInputElement>(null),
     resultInput = useRef<HTMLInputElement>(null),
@@ -694,8 +700,9 @@ export default function App() {
   const previewRegional = (report: RegionReport) => {
     if (!marketProfile) return;
     if (!doctorSelectionValid) { notify("Enter a positive whole number of doctors.", true); return; }
+    if (compositionError) { notify(compositionError, true); return; }
     try {
-      const m = makeMail(report, marketProfile, month + " · " + periodText, currentHierarchy, workspace.settings, national);
+      const m = makeMail(report, marketProfile, month + " · " + periodText, currentHierarchy, composeSettings, national);
       setPreview({ html: m.html, title: m.subject, mail: m, sender: { name: workspace.settings.name, email: workspace.settings.email } });
     } catch (e) { notify((e as Error).message, true); }
   };
@@ -893,7 +900,16 @@ export default function App() {
     )
       .map((x) => x.toString(16).padStart(2, "0"))
       .join("");
-    if (workspace.datasets.some((d) => d.hash === scopeDigest)) {
+    const existingSource = workspace.datasets.find(d => d.hash === scopeDigest);
+    if (existingSource) {
+      if (!existingSource.aseByMpe && pendingSource.aseByMpe && Object.values(pendingSource.aseByMpe).some(values => Object.keys(values).length)) {
+        const recovered = { ...existingSource, aseByMpe: pendingSource.aseByMpe };
+        if (await update({ ...workspace, datasets: workspace.datasets.map(d => d.id === existingSource.id ? recovered : d) })) {
+          setPendingSource(null);
+          notify("ASE details recovered for the saved source.");
+        }
+        return;
+      }
       notify(
         "This file and market selection were already imported. Use its saved version in Source files.",
         true,
@@ -983,6 +999,7 @@ export default function App() {
   async function generate() {
     if (!marketProfile) return;
     if (!doctorSelectionValid) { notify("Enter a positive whole number of doctors.", true); return; }
+    if (compositionError) { notify(compositionError, true); return; }
     const chosen = validQueue.filter((q) => selected.has(key(q.report)));
     if (!chosen.length) {
       notify("Select at least one region with a valid recipient.", true);
@@ -995,7 +1012,7 @@ export default function App() {
           marketProfile,
           month + " · " + periodText,
           currentHierarchy,
-          workspace.settings,
+          composeSettings,
           national,
         ),
       );
@@ -1008,7 +1025,7 @@ export default function App() {
         generic: profile.generic,
         sourceIds: activeSources.map((d) => d.id),
         hierarchyId: currentHierarchy!.id,
-        settings: structuredClone(workspace.settings),
+        settings: structuredClone(composeSettings),
         profile: structuredClone(marketProfile),
         national: structuredClone(national),
         doctorSelection: structuredClone(doctorSelection),
@@ -1475,6 +1492,13 @@ export default function App() {
                   </span>
                 </div>
               </section>
+              <details className="card email-customization">
+                <summary>Customize email subject &amp; body</summary>
+                <div className="email-customization-body">
+                  <p className="muted">Changes apply to this batch. Save permanent wording in Your email defaults.</p>
+                  <EmailTemplateEditor value={emailTemplate} onChange={setEmailTemplate} />
+                </div>
+              </details>
               <div className="stats">
                 <div className="stat stat-teal"><div className="stat-icon"><Mail size={21} /></div><div><span>Emails ready</span><strong>{num(validQueue.length)}</strong><small>{structure === "Both" ? "ACD + CCD" : structure}</small></div></div>
                 <div className="stat stat-blue"><div className="stat-icon"><FlaskConical size={21} /></div><div><span>National {profile?.brand} share</span><strong>{!loading && national.available && national.share !== null ? national.share.toFixed(1) + "%" : "N/A"}</strong><small>Same market and period</small></div></div>
@@ -1629,7 +1653,7 @@ export default function App() {
                             <td>
                               <button
                                 className="icon-button"
-                                disabled={!!q.error || !doctorSelectionValid}
+                                disabled={!!q.error || !doctorSelectionValid || !!compositionError}
                                 aria-label={`Preview ${q.report.region} email`}
                                 onClick={() => previewRegional(q.report)}
                               >
@@ -1668,7 +1692,7 @@ export default function App() {
                     {selected.size} selected · .eml ZIP, manual sending
                   </span>
                   <Button
-                    disabled={busy || loading || !selected.size || !doctorSelectionValid}
+                    disabled={busy || loading || !selected.size || !doctorSelectionValid || !!compositionError}
                     onClick={generate}
                   >
                     <Mail size={17} />
@@ -1677,7 +1701,7 @@ export default function App() {
                   </Button>
                 </div>
               </section>
-              <RegionReview report={review?.report} brand={profile?.brand || ""} recipient={review?.row?.rseName} national={national} blocked={review?.error || (!doctorSelectionValid ? "Enter a positive whole number of doctors." : undefined)} onPreview={() => review && previewRegional(review.report)} />
+              <RegionReview report={review?.report} brand={profile?.brand || ""} recipient={review?.row?.rseName} national={national} blocked={review?.error || compositionError || (!doctorSelectionValid ? "Enter a positive whole number of doctors." : undefined)} onPreview={() => review && previewRegional(review.report)} />
               </div>
               <div className="help-line">
                 <span>
@@ -2230,10 +2254,15 @@ export default function App() {
                       setSettingsDraft({ ...settingsDraft, personalCc })
                     }
                   />
+                  <hr />
+                  <h3>Default email wording</h3>
+                  <EmailTemplateEditor value={emailTemplateFor(settingsDraft)} onChange={emailTemplate => setSettingsDraft({ ...settingsDraft, emailTemplate })} />
                   <div className="settings-footer">
                     <Button
                       disabled={busy}
                       onClick={async () => {
+                        const wordingError = templateError(emailTemplateFor(settingsDraft));
+                        if (wordingError) { notify(wordingError, true); return; }
                         if (
                           !settingsDraft.name.trim() ||
                           !emailValid(settingsDraft.email) ||
@@ -2541,7 +2570,7 @@ export default function App() {
       )}
       {preview && (
         <Modal title={preview.mail ? "Email preview" : preview.title} wide onClose={() => setPreview(null)}>
-          {preview.mail && <div className="preview-envelope"><div><strong>To {preview.mail.to.name}</strong><span>{preview.mail.to.email}</span><small>CC {preview.mail.cc.map(c => c.name || c.email).join(" · ") || "None"}</small></div><div className="preview-view" role="group" aria-label="Email table view"><button aria-pressed={compactPreview} className={compactPreview ? "active" : ""} onClick={() => setCompactPreview(true)}>Compact</button><button aria-pressed={!compactPreview} className={!compactPreview ? "active" : ""} onClick={() => setCompactPreview(false)}>Full table</button></div></div>}
+          {preview.mail && <div className="preview-envelope"><div><strong>To {preview.mail.to.name}</strong><span>{preview.mail.to.email}</span><small>CC {preview.mail.cc.map(c => c.name || c.email).join(" · ") || "None"}</small><small className="preview-subject">Subject: {preview.mail.subject}</small></div><div className="preview-view" role="group" aria-label="Email table view"><button aria-pressed={compactPreview} className={compactPreview ? "active" : ""} onClick={() => setCompactPreview(true)}>Compact</button><button aria-pressed={!compactPreview} className={!compactPreview ? "active" : ""} onClick={() => setCompactPreview(false)}>Full table</button></div></div>}
           <iframe
             className="email-preview"
             title="Email preview"

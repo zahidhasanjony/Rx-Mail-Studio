@@ -213,8 +213,10 @@ const keys = {
   specialty: ["DOC SPECIALTY", "SPECIALTY"],
   acdRegion: ["ACD RSE"],
   acdMpe: ["ACD MPE"],
+  acdAse: ["ACD ASE"],
   ccdRegion: ["CCD. RSE CODE", "CCD RSE CODE"],
   ccdMpe: ["CCD. MPE CODE", "CCD MPE CODE"],
+  ccdAse: ["CCD.ASE CODE", "CCD. ASE CODE", "CCD ASE CODE"],
 };
 export async function importRx(
   file: File,
@@ -234,6 +236,7 @@ export async function importRx(
     catalog = new Map<string, BrandProfile>(),
     dates = new Set<string>(),
     regions = { ACD: new Set<string>(), CCD: new Set<string>() },
+    aseParents = { ACD: new Map<string, Set<string>>(), CCD: new Map<string, Set<string>>() },
     regionDates: Record<"ACD" | "CCD", Map<string, Set<string>>> = {
       ACD: new Map(),
       CCD: new Map(),
@@ -291,13 +294,25 @@ export async function importRx(
           specialty: get("specialty"),
           acdRegion: normalize(get("acdRegion")),
           acdMpe: normalize(get("acdMpe")),
+          acdAse: normalize(get("acdAse")),
           ccdRegion: normalize(get("ccdRegion")),
           ccdMpe: normalize(get("ccdMpe")),
+          ccdAse: normalize(get("ccdAse")),
           count: 1,
           sourceRow: line,
           sheet: sheet.name,
         };
         dates.add(date);
+        for (const [structure, region, mpe, ase] of [
+          ["ACD", f.acdRegion, f.acdMpe, f.acdAse],
+          ["CCD", f.ccdRegion, f.ccdMpe, f.ccdAse],
+        ] as const) {
+          if (!region || !mpe) continue;
+          const key = JSON.stringify([region, mpe]);
+          const parents = aseParents[structure].get(key) || new Set<string>();
+          parents.add(ase || "");
+          aseParents[structure].set(key, parents);
+        }
         if (f.acdRegion) regions.ACD.add(f.acdRegion);
         if (f.ccdRegion) regions.CCD.add(f.ccdRegion);
         for (const [structure, region] of [
@@ -323,6 +338,8 @@ export async function importRx(
             f.acdMpe,
             f.ccdRegion,
             f.ccdMpe,
+            f.acdAse,
+            f.ccdAse,
             f.doctorName,
             f.specialty,
           ]);
@@ -402,6 +419,10 @@ export async function importRx(
       ),
     },
     dates: [...dates].sort(),
+    aseByMpe: {
+      ACD: Object.fromEntries([...aseParents.ACD].filter(([, parents]) => parents.size === 1 && !parents.has("")).map(([key, parents]) => [key, [...parents][0]])),
+      CCD: Object.fromEntries([...aseParents.CCD].filter(([, parents]) => parents.size === 1 && !parents.has("")).map(([key, parents]) => [key, [...parents][0]])),
+    },
   };
 }
 export async function readSheetRows(
