@@ -39,6 +39,9 @@
 .breadcrumbs, .breadcrumbs strong { color: var(--muted); font-size: 12px; }
 .mode-pill { color: var(--rx-primary); background: var(--rx-mint); border-color: #bcdfd4; font-size: 11px; }
 .mode-pill.demo { color: var(--rx-amber); background: var(--rx-amber-surface); }
+.mode-pill.cloud-dot { width: 40px; height: 40px; min-width: 40px; padding: 0; justify-content: center; border: 0; background: transparent; }
+.mode-pill.cloud-dot:hover { background: var(--rx-mint); }
+.mode-pill.cloud-dot .status-dot { display: block; background: #12b76a; }
 main { padding-top: 32px; }
 .page-heading > div > p:last-child { color: var(--muted); font-size: 14px; }
 .eyebrow { color: var(--rx-violet); font-size: 10px; }
@@ -142,6 +145,10 @@ input::placeholder, textarea::placeholder { color: #6f8194; }
 .upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 .upload-card { background: var(--rx-blue-surface); border: 1px dashed #a3bbdf; border-radius: 12px; padding: 30px 24px; }
 .upload-card h2 { color: var(--rx-blue); font-size: 19px; }
+.source-upload .upload-card { padding: 18px; display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 24px; }
+.source-upload .upload-symbol { margin: 0; width: 44px; height: 44px; }
+.source-upload .upload-card h2 { margin: 0; font-size: 16px; }
+.hierarchy-summary .small-card { margin-bottom: 24px; }
 .upload-card p, .upload-card small { color: var(--muted); font-size: 12px; }
 .upload-symbol { background: #e1ebfc; color: var(--rx-blue); }
 .hierarchy-upload { background: var(--rx-violet-surface); border-color: #c5aee7; }

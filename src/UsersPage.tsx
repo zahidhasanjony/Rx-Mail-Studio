@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Users, ShieldCheck, KeyRound, Pencil, RefreshCw, X, Eye, EyeOff } from "lucide-react";
+import { Plus, Users, KeyRound, Pencil, RefreshCw, X, Eye, EyeOff } from "lucide-react";
 import { accountRequest } from "./auth";
 import type { UserAccount, UserRole } from "./auth";
 import "./users.css";
@@ -37,7 +37,7 @@ export default function UsersPage({ admin, notify, onAccountChange }: {
   return <div className="users-layout">
     {error && <div className="notice user-error" role="alert">{error}</div>}
     <section className="card user-create">
-      <div className="user-card-title"><span className="user-icon"><Plus size={21} /></span><div><h3>Create user</h3><p>Give your team a username and password.</p></div></div>
+      <div className="user-card-title"><span className="user-icon"><Plus size={21} /></span><div><h3>Create user</h3></div></div>
       <form onSubmit={async (e) => {
         e.preventDefault();
         if (await save({ action: "create", ...draft }, `User ${draft.username.toUpperCase()} created`)) { setDraft(fresh()); setShowPassword(false); }
@@ -46,12 +46,11 @@ export default function UsersPage({ admin, notify, onAccountChange }: {
         <label className="field"><span>Display name</span><input autoComplete="off" required maxLength={120} placeholder="Team member’s name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></label>
         <label className="field"><span>Password</span><span className="password-input"><input autoComplete="new-password" type={showPassword ? "text" : "password"} required minLength={4} maxLength={128} value={draft.password} onChange={(e) => setDraft({ ...draft, password: e.target.value })} /><button type="button" className="icon-button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></span><small>At least 4 characters. Share it with the user yourself.</small></label>
         {roleSelect(draft.role, (role) => setDraft({ ...draft, role }))}
-        <div className="user-helper"><ShieldCheck size={17} /><span>No email address or confirmation needed.</span></div>
         <button className="button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create user"}<Plus size={16} /></button>
       </form>
     </section>
     <section className="card user-list">
-      <div className="user-list-heading"><div><h3><Users size={19} /> Workspace users <span className="badge neutral">{users.length}</span></h3><p>Manage access and reset passwords from one place.</p></div><button className="icon-button" aria-label="Refresh users" disabled={busy || loading} onClick={() => void refresh()}><RefreshCw size={18} /></button></div>
+      <div className="user-list-heading"><div><h3><Users size={19} /> Workspace users <span className="badge neutral">{users.length}</span></h3></div><button className="icon-button" aria-label="Refresh users" disabled={busy || loading} onClick={() => void refresh()}><RefreshCw size={18} /></button></div>
       {loading ? <p className="user-loading">Loading users…</p> : <div className="table-scroll"><table className="users-table"><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>{users.map((user) => <tr key={user.id}>
         <td><strong>{user.username}</strong>{user.id === admin.id && <small className="user-you">You</small>}<span className="user-name">{user.name}</span></td>
         <td>{roleLabel(user.role)}</td><td><span className={`badge ${user.active ? "success" : "neutral"}`}>{user.active ? "Active" : "Disabled"}</span></td>

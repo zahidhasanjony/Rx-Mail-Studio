@@ -10,7 +10,7 @@ import { defaultEmailTemplate } from "../src/types.ts";
 import { JSDOM } from "jsdom";
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 
-test("compiled login restores cloud sessions, exposes admin shortcuts and signs out from every page", async () => {
+test("compiled login restores the cloud indicator, preserves admin page access and signs out from every page", async () => {
   const output = await mkdtemp(join(tmpdir(), "rxm-auth-ui-"));
   try {
     await build({ logLevel: "silent", define: {
@@ -92,24 +92,23 @@ test("compiled login restores cloud sessions, exposes admin shortcuts and signs 
           await waitFor(() => w.document.querySelector('[aria-label="Username"]'));
           fill(w.document.querySelector('[aria-label="Username"]'), account.username); fill(w.document.querySelector('[aria-label="Password"]'), "abcd");
           w.document.querySelector('.modal form').dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
-          await waitFor(() => button("Cloud connected"));
+          await waitFor(() => w.document.querySelector('.mode-pill[aria-label="Cloud connected"]'));
           assert.deepEqual(calls.find((c) => c.action === "login"), { action: "login", username: account.username, password: "abcd" });
         } else {
-          await waitFor(() => button("Cloud connected"));
+          await waitFor(() => w.document.querySelector('.mode-pill[aria-label="Cloud connected"]'));
           assert.ok(!calls.some(c => c.action === "login"), "A saved verified session restores cloud mode without another login");
         }
         await waitFor(() => button("Sign out"));
         assert.ok(w.document.querySelector(".topbar").textContent.includes(account.username));
-        assert.equal(!!button("Admin controls"), role === "owner");
+        assert.ok(!button("Admin controls"));
+        const cloudDot = w.document.querySelector('.mode-pill[aria-label="Cloud connected"]');
+        assert.equal(cloudDot.textContent, "");
+        assert.equal(cloudDot.title, "Cloud connected");
+        assert.equal(cloudDot.querySelectorAll('.status-dot').length, 1);
         if (role === "owner") {
-          button("Admin controls").click();
-          await waitFor(() => w.document.querySelector('[aria-label="Admin controls"]'));
-          assert.match(w.document.querySelector('.modal').textContent,/Manage users/);
-          assert.match(w.document.querySelector('.modal').textContent,/Manage hierarchy/);
-          const hierarchyShortcut = [...w.document.querySelectorAll('.admin-shortcuts button')].find(b => b.textContent.includes('Manage hierarchy'));
-          hierarchyShortcut.click();
+          button("Region hierarchy").click();
           await waitFor(() => button("Create version"));
-          assert.ok(!w.document.querySelector('[aria-label="Admin controls"]'));
+          assert.ok(!button("Create version").disabled);
         }
         button("Brand library").click();
         await waitFor(() => w.document.querySelector('.brand-card h2') && w.document.body.textContent.includes('TOFEN'));
@@ -129,7 +128,7 @@ test("compiled login restores cloud sessions, exposes admin shortcuts and signs 
           assert.equal(w.document.querySelectorAll('.brand-card').length,10);
         }
         button("Settings").click();
-        await waitFor(() => w.document.body.textContent.includes("Team default email wording"));
+        await waitFor(() => button("Save my defaults"));
         if (role === "owner") {
           await waitFor(() => button("Publish team default"));
           assert.ok(button("Publish team default").disabled);
@@ -142,7 +141,7 @@ test("compiled login restores cloud sessions, exposes admin shortcuts and signs 
           assert.equal(sharedTemplate.personalCc, undefined, "Publishing shared wording never shares personal contacts");
         } else {
           assert.ok(!button("Publish team default"));
-          assert.match(w.document.body.textContent, /Only admins can change the team default/);
+          assert.ok(!w.document.querySelector('.settings-body .email-template-editor'));
         }
         button("Region hierarchy").click();
         await waitFor(() => button("Create version"));
@@ -183,7 +182,7 @@ test("compiled login restores cloud sessions, exposes admin shortcuts and signs 
         [...w.document.querySelectorAll("aside nav button")].find(b => b.textContent.trim().startsWith("Generate emails")).click();
         await waitFor(() => button("Sign out"));
         button("Sign out").click();
-        await waitFor(() => button("Sign in") && !button("Cloud connected"));
+        await waitFor(() => button("Sign in") && !w.document.querySelector('.mode-pill[aria-label="Cloud connected"]'));
         assert.equal(w.localStorage.getItem("sb-rx-project-auth-token"), null);
         assert.ok(!button("Admin controls")); assert.ok(!button("Users"));
         button("Source files").click();

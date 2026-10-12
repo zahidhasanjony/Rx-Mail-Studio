@@ -479,7 +479,6 @@ export default function App() {
     } | null>(null),
     [batchModal, setBatchModal] = useState<Batch | null>(null),
     [login, setLogin] = useState(false),
-    [adminPanel, setAdminPanel] = useState(false),
     [userEmail, setUserEmail] = useState(""),
     [username, setUsername] = useState(""),
     [password, setPassword] = useState(""),
@@ -569,7 +568,6 @@ export default function App() {
     let alive = true;
     if (!userEmail) {
       setAccount(null);
-      setAdminPanel(false);
       if (mode === "cloud") {
         setWorkspace(emptyWorkspace()); setMode("local");
         setPreview(null); setBatchModal(null);
@@ -1216,7 +1214,7 @@ export default function App() {
     try {
       const result = await supabase?.auth.signOut({ scope: "local" });
       if (result?.error) throw result.error;
-      setAccount(null); setUserEmail(""); setAdminPanel(false);
+      setAccount(null); setUserEmail("");
       setPassword(""); setUsername(""); setLogin(false);
       setPreview(null); setBatchModal(null); setDeleteSource(null);
       setHierarchyMap(null); setPendingHierarchy(null); setEditingRow(null);
@@ -1225,9 +1223,6 @@ export default function App() {
       notify("Signed out");
     } catch (e) { notify((e as Error).message, true); }
     finally { setBusy(false); }
-  }
-  function openAdminPage(target: Page) {
-    setAdminPanel(false); setMobileNav(false); setPage(target);
   }
   async function refreshBrandCatalogue() {
     if (!isAdmin) { notify("Admin access required", true); return; }
@@ -1277,13 +1272,6 @@ export default function App() {
       if (resultInput.current) resultInput.current.value = "";
     }
   }
-  const periodText =
-    {
-      all: "All available dates",
-      first: "1–10",
-      second: "11–20",
-      third: "21–month end",
-    }[period] || "";
   const demo = () => {
     initialChoice.current = true;
     setWorkspace(demoWorkspace());
@@ -1332,13 +1320,6 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="side-tip">
-            <ShieldCheck size={19} />
-            <div>
-              <strong>Your review comes first</strong>
-              <p>Prepare together. Review and send from Outlook.</p>
-            </div>
-          </div>
           <button className="user" onClick={() => setPage("settings")}>
             <span className="avatar">{account?.username.slice(0, 2) || "SB"}</span>
             <span>
@@ -1367,21 +1348,19 @@ export default function App() {
           </div>
           <div className="top-actions">
             <button
-              className={`mode-pill ${mode === "demo" ? "demo" : ""}`}
+              className={`mode-pill ${mode === "demo" ? "demo" : mode === "cloud" ? "cloud-dot" : ""}`}
+              aria-label={mode === "cloud" ? "Cloud connected" : mode === "demo" ? "Sample workspace" : "On this device"}
+              title={mode === "cloud" ? "Cloud connected" : mode === "demo" ? "Sample workspace" : "On this device"}
               onClick={openCloud}
             >
-              {mode === "cloud" ? <Cloud size={14} /> : <Monitor size={14} />}
-              <span>
-                {mode === "cloud"
-                  ? "Cloud connected"
-                  : mode === "demo"
+              {mode !== "cloud" && <><Monitor size={14} /><span>
+                {mode === "demo"
                     ? "Sample workspace"
                     : "On this device"}
-              </span>
+              </span></>}
               <span className="status-dot" />
             </button>
             {account && <span className="account-identity">{account.username}<small>{account.role === "owner" ? "Admin" : account.role === "editor" ? "Editor" : "Member"}</small></span>}
-            {isAdmin && <Button className="top-account-action admin-control-button" variant="secondary" onClick={() => setAdminPanel(true)}><ShieldCheck size={15} />Admin controls</Button>}
             {userEmail ? <Button className="top-account-action" variant="text" disabled={busy} onClick={signOutAccount}><LogOut size={15} />Sign out</Button> :
               <Button className="top-account-action" variant="secondary" disabled={busy} onClick={() => { initialChoice.current = true; setLogin(true); }}><Users size={15} />Sign in</Button>}
           </div>
@@ -1415,11 +1394,6 @@ export default function App() {
           )}
           <div className="page-heading">
             <div>
-              <p className="eyebrow">
-                {page === "generate"
-                  ? "REGIONAL COMMUNICATION"
-                  : "RX MAIL STUDIO"}
-              </p>
               <h1>
                 {
                   {
@@ -1433,25 +1407,6 @@ export default function App() {
                   }[page]
                 }
               </h1>
-              <p>
-                {
-                  {
-                    generate:
-                      "Turn MRW prescription data into clear, personal regional updates.",
-                    sources:
-                      "Import your MRW workbooks and manage reporting coverage.",
-                    hierarchy:
-                      "Keep every region connected to the right RSE and hierarchy.",
-                    brands:
-                      "Define the brand, generic and dosage forms for each market.",
-                    history:
-                      "Every prepared email keeps its data and recipients as they were.",
-                    settings:
-                      "Personal recipients, email content and your SBM team.",
-                    users: "Create team accounts and control access to your workspace.",
-                  }[page]
-                }
-              </p>
             </div>
             {page === "sources" ? (
               <Button
@@ -1512,7 +1467,7 @@ export default function App() {
                       />
                     </div>
                   </Field>
-                  <Field label="To month" hint="Use the same month for a single-month report.">
+                  <Field label="To month">
                     <input type="month" min={month} value={endMonth} onChange={e => e.target.value && setEndMonth(e.target.value)} aria-label="To month" />
                   </Field>
                   <Field label="Territory structure">
@@ -1558,7 +1513,7 @@ export default function App() {
                     </select>
                   </Field>
                   <div className="doctor-limit-field">
-                    <Field label="Doctors per region" hint={doctorSelectionValid ? "MPE first, then highest generic Rx. Limit applies after specialty filtering." : "Enter a positive whole number."}>
+                    <Field label="Doctors per region" hint={doctorSelectionValid ? undefined : "Enter a positive whole number."}>
                       <div className="doctor-limit-control">
                         <select value={doctorMode} onChange={e => setDoctorMode(e.target.value as "all" | "top")} aria-label="Doctor selection">
                           <option value="all">All doctors</option>
@@ -1590,17 +1545,16 @@ export default function App() {
                 </div>
               </section>
               {rangeError && <div className="notice benchmark-notice" role="status"><AlertCircle size={17} /><span>{rangeError}</span></div>}
-              {month !== endMonth && <p className="muted">One email per region combines this month range. The selected Flash applies to every month.</p>}
               <details className="card email-customization">
                 <summary>Customize email subject &amp; body</summary>
                 <div className="email-customization-body">
-                  <p className="muted">Changes apply to this batch. Admins publish team defaults in Your email defaults.</p>
+
                   <EmailTemplateEditor value={emailTemplate} onChange={setEmailTemplate} />
                 </div>
               </details>
               <div className="stats">
                 <div className="stat stat-teal"><div className="stat-icon"><Mail size={21} /></div><div><span>Emails ready</span><strong>{num(validQueue.length)}</strong><small>{structure === "Both" ? "ACD + CCD" : structure}</small></div></div>
-                <div className="stat stat-blue"><div className="stat-icon"><FlaskConical size={21} /></div><div><span>National {profile?.brand} share</span><strong>{!loading && national.available && national.share !== null ? national.share.toFixed(1) + "%" : "N/A"}</strong><small>Same market and period</small></div></div>
+                <div className="stat stat-blue"><div className="stat-icon"><FlaskConical size={21} /></div><div><span>National {profile?.brand} share</span><strong>{!loading && national.available && national.share !== null ? national.share.toFixed(1) + "%" : "N/A"}</strong></div></div>
                 <div className="stat stat-violet"><div className="stat-icon"><Users size={21} /></div><div><span>Doctor review</span><strong>{national.available ? num(doctorReports.reduce((n, r) => n + r.doctors.filter(d => belowNational(d, national)).length, 0)) : "—"}</strong><small>Entries below national</small></div></div>
               </div>
               {!loading && activeSources.length > 0 && !national.available && <div className="notice benchmark-notice"><AlertCircle size={17} /><span>National benchmark unavailable. {national.reason} Doctor rows will remain unmarked.</span></div>}
@@ -1612,9 +1566,6 @@ export default function App() {
                       Regional email queue{" "}
                       <span className="count-badge">{queue.length}</span>
                     </h2>
-                    <p>
-                      {profile?.brand} · {profile?.generic} · {periodText}
-                    </p>
                   </div>
                   <div className="search">
                     <Search size={16} />
@@ -1809,28 +1760,11 @@ export default function App() {
               </section>
               <RegionReview report={review?.report} brand={profile?.brand || ""} recipient={review?.row?.rseName} national={national} blocked={review?.error || compositionError || (!doctorSelectionValid ? "Enter a positive whole number of doctors." : undefined)} onPreview={() => review && previewRegional(review.report)} />
               </div>
-              <div className="help-line">
-                <span>
-                  <Monitor size={15} />
-                  Generate one ZIP with a separate .eml email for each region.
-                </span>
-                <button
-                  onClick={() =>
-                    setPreview({
-                      title: "How .eml export works",
-                      html: '<body style="font:16px Arial;padding:30px;line-height:1.7"><h2>Regional .eml emails</h2><p>Generate your batch to download one ZIP. Extract it and open the .eml files in Outlook. Each file has its own To, CC, subject, Rx share summary, prescriber table and signature.</p><p>Check one file first: email clients differ in how they open unsent .eml messages. If yours opens a read-only message, use its edit/compose option or the optional Classic Outlook launcher.</p><p>Review and send manually. Downloads never mark emails Opened or Sent. Download the ZIP again or a single .eml from Batch history. Outlook may autosave messages after you open them.</p></body>',
-                    })
-                  }
-                >
-                  How it works
-                  <ArrowUpRight size={13} />
-                </button>
-              </div>
             </>
           )}
           {page === "sources" && (
             <>
-              <div className="upload-grid">
+              <div className="source-upload">
               <section
                 className="upload-card"
                 onDragOver={(e) => e.preventDefault()}
@@ -1842,27 +1776,7 @@ export default function App() {
                 <div className="upload-symbol">
                   <FileSpreadsheet size={31} />
                 </div>
-                <h2>Bring your MRW workbook</h2>
-                <p>
-                  Drop an Excel file here, or choose one from your device.
-                  <br />
-                  Review the detected columns before importing.
-                </p>
-                <Button
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() => sourceInput.current?.click()}
-                >
-                  Choose .xlsx file
-                  <ArrowRight size={16} />
-                </Button>
-                <small>
-                  Prescription date determines reporting month · ACD and CCD
-                  supported
-                </small>
-              </section>
-              <section className="upload-card hierarchy-upload" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); void selectFile(e.dataTransfer.files[0], "hierarchy"); }}>
-                <div className="upload-symbol"><Network size={31} /></div><h2>Quarterly hierarchy</h2><p>Upload the latest regional recipients.<br />Review RSE and PSL routing, then set the effective date.</p><Button variant="secondary" disabled={busy || !isAdmin} onClick={() => hierarchyInput.current?.click()}>Choose hierarchy file <ArrowRight size={16} /></Button><small>Excel or CSV · Versioned by effective date</small>
+                <h2>Drop .xlsx here</h2>
               </section>
               </div>
               <section className="card">
@@ -1874,10 +1788,6 @@ export default function App() {
                         {workspace.datasets.length}
                       </span>
                     </h2>
-                    <p>
-                      Overlapping reporting dates are replaced explicitly to
-                      avoid double counting.
-                    </p>
                   </div>
                 </div>
                 {workspace.datasets.length ? (
@@ -1954,7 +1864,7 @@ export default function App() {
           )}
           {page === "hierarchy" && (
             <>
-              <div className="info-grid">
+              <div className="hierarchy-summary">
                 <div className="card small-card">
                   <span className="label">CURRENT VERSION</span>
                   <h3>{currentHierarchy?.name || "Not configured"}</h3>
@@ -1962,14 +1872,6 @@ export default function App() {
                     {currentHierarchy
                       ? `Effective ${formatDate(currentHierarchy.effectiveFrom)} · ${currentHierarchy.rows.filter((r) => r.active).length} active region assignments`
                       : "Upload your quarterly hierarchy or add regions manually."}
-                  </p>
-                </div>
-                <div className="card small-card">
-                  <span className="label">QUARTERLY CHANGES</span>
-                  <h3>History stays intact</h3>
-                  <p>
-                    Every new version has an effective date. Prepared batches
-                    keep their original recipients.
                   </p>
                   <button
                     className="text-link"
@@ -2006,9 +1908,6 @@ export default function App() {
                 <div className="card-header">
                   <div>
                     <h2>Regional recipients</h2>
-                    <p>
-                      To: regional RSE · CC: your saved personal recipients first, then hierarchy
-                    </p>
                   </div>
                   <Button
                     variant="secondary"
@@ -2144,13 +2043,6 @@ export default function App() {
           )}
           {page === "brands" && (
             <>
-              <div className="notice">
-                <FlaskConical size={17} />
-                <span>
-                  Brand pairs are discovered from Beximco rows in your MRW
-                  files. Review dosage forms before generating emails.
-                </span>
-              </div>
               <div className="card brand-library-toolbar">
                 <form onSubmit={e => { e.preventDefault(); setBrandSearch(brandSearchDraft); }} className="brand-library-search" role="search" aria-label="Brand Library search">
                   <div className="search"><Search size={16} /><input aria-label="Search Brand Library" placeholder="Search brand or generic" value={brandSearchDraft} onChange={e => setBrandSearchDraft(e.target.value)} /></div>
@@ -2231,10 +2123,6 @@ export default function App() {
               <div className="card-header">
                 <div>
                   <h2>Prepared batches</h2>
-                  <p>
-                    Opening status comes from your Outlook launcher results,
-                    never from a download.
-                  </p>
                 </div>
                 <span className="count-badge">{workspace.batches.length}</span>
               </div>
@@ -2314,9 +2202,6 @@ export default function App() {
                 <div className="card-header">
                   <div>
                     <h2>Your email defaults</h2>
-                    <p>
-                      {mode === "cloud" ? "Saved for your account until you edit them." : mode === "local" ? "Saved on this device until you edit them." : "Sample defaults are temporary. Sign in to save your own."}
-                    </p>
                   </div>
                 </div>
                 <div className="settings-body">
@@ -2372,16 +2257,10 @@ export default function App() {
                       />
                     </Field>
                   </div>
-                  <p className="muted">Enter your designation without SBM; it is added automatically.</p>
                   <h3>Signature preview</h3>
-                  <p className="muted">The closing, SBM department, company, office address, telephone, fax and website are fixed.</p>
                   <div className="signature-preview" dangerouslySetInnerHTML={{ __html: emailSignature(settingsDraft) }} />
                   <hr />
                   <h3>Your team and boss in CC</h3>
-                  <p className="muted">
-                    These recipients come first in every regional email, followed by
-                    hierarchy CC.
-                  </p>
                   <ContactsEditor
                     value={settingsDraft.personalCc}
                     onChange={(personalCc) =>
@@ -2389,8 +2268,7 @@ export default function App() {
                     }
                   />
                   <hr />
-                  <h3>Team default email wording</h3>
-                  <p className="muted">Admins publish the shared subject and body. Your signature and personal CC stay saved for your account.</p>
+                  {(isAdmin || mode !== "cloud") && <h3>Team default email wording</h3>}
                   {isAdmin ? <>
                     <EmailTemplateEditor value={emailTemplateFor(settingsDraft)} onChange={emailTemplate => setSettingsDraft({ ...settingsDraft, emailTemplate })} />
                     <label className="sheet-choice"><input type="checkbox" checked={publishDefault} onChange={e => setPublishDefault(e.target.checked)} />Make this the default for all users</label>
@@ -2404,7 +2282,7 @@ export default function App() {
                         notify("Team email default published. It applies when users refresh their workspace.");
                       } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
                     }}>Publish team default</Button>
-                  </> : mode === "cloud" ? <p className="muted">Only admins can change the team default. You can customize subject and body for each batch in Generate emails.</p> :
+                  </> : mode === "cloud" ? null :
                     <EmailTemplateEditor value={emailTemplateFor(settingsDraft)} onChange={emailTemplate => setSettingsDraft({ ...settingsDraft, emailTemplate })} />}
                   <div className="settings-footer">
                     <Button
@@ -2446,10 +2324,7 @@ export default function App() {
                     <Monitor size={24} />
                   </div>
                   <h3>Classic Outlook companion</h3>
-                  <p>
-                    Optional: open editable messages directly on your Windows PC.
-                    The default .eml export works without this companion.
-                  </p>
+
                   <span
                     className={`badge ${bridgeConnected ? "success" : "neutral"}`}
                   >
@@ -2505,24 +2380,14 @@ export default function App() {
                     />
                     Also open automatically after generation
                   </label>
-                  <p className="tiny">
-                    Keep the companion running. Messages open for your review;
-                    sending stays manual. If local connections are blocked, use
-                    Download .eml ZIP.
-                  </p>
+
                 </section>
                 <section className="card small-card connection-card">
                   <div className="connection-icon">
                     <Cloud size={24} />
                   </div>
                   <h3>SBM cloud workspace</h3>
-                  <p>
-                    {mode === "cloud"
-                      ? `Signed in as ${account?.username || "your account"}`
-                      : cloudConfigured
-                        ? "Sign in with your username to share sources and hierarchy with your SBM team."
-                        : "Cloud connection is not configured yet."}
-                  </p>
+                  {!cloudConfigured && <p>Cloud connection is not configured yet.</p>}
                   <Button variant="secondary" onClick={openCloud}>
                     {mode === "cloud" ? (
                       <RefreshCw size={15} />
@@ -2533,11 +2398,7 @@ export default function App() {
                       ? "Refresh cloud workspace"
                       : "Connect to cloud"}
                   </Button>
-                  {userEmail && <p className="tiny">Use Sign out at the top of any page to leave your account.</p>}
-                  <p className="tiny">
-                    Device data is saved in this browser. It is not
-                    automatically uploaded when you sign in.
-                  </p>
+
                   <Button
                     variant="text"
                     onClick={async () => {
@@ -2608,32 +2469,10 @@ export default function App() {
                     Open device workspace
                   </Button>
                 </section>
-                {mode === "cloud" && account?.role === "owner" && (
-                  <section className="card small-card team-card">
-                    <h3>Team accounts</h3>
-                    <p>Create usernames and passwords, choose access roles, and reset passwords from the Users page.</p>
-                    <Button variant="secondary" onClick={() => setPage("users")}><Users size={16} />Manage users</Button>
-                  </section>
-                )}
-                <section className="card small-card">
-                  <h3>Install on your phone</h3>
-                  <p>
-                    Use your browser’s “Install app” or “Add to Home Screen”
-                    menu. The same responsive workspace works on mobile.
-                  </p>
-                  <span className="badge neutral">
-                    <Monitor size={13} />
-                    .eml download available on mobile
-                  </span>
-                </section>
               </div>
             </div>
           )}
           {page === "users" && mode === "cloud" && account?.role === "owner" && <UsersPage admin={account} notify={notify} onAccountChange={setAccount} />}
-          <footer className="page-footer">
-            <span>Rx Mail Studio</span>
-            <span>Built for your SBM workflow</span>
-          </footer>
         </main>
         <nav className="mobile-bottom">
           {nav
@@ -3360,19 +3199,8 @@ export default function App() {
                 <h3>
                   {batchModal.brand} · {reportingPeriod(batchModal.month, batchModal.endMonth || batchModal.month, batchModal.period)}
                 </h3>
-                <p>
-                  Recipients, prescriber tables and regional Rx shares are
-                  ready.
-                </p>
+
               </div>
-            </div>
-            <div className="notice">
-              <Monitor size={19} />
-              <span>
-                Download the .eml ZIP, extract it, and open each email in Outlook.
-                Each region has its own To and CC. Review and send manually.
-                No companion or PowerShell is needed for .eml files.
-              </span>
             </div>
             <div className="table-scroll max-table">
               <table>
@@ -3429,17 +3257,7 @@ export default function App() {
                 </tbody>
               </table>
             </div>
-            <p className="tiny">
-              Check one .eml first; editable opening depends on your email client.
-              Downloading leaves opening status unchanged. Outlook may autosave
-              messages after you open them. The Classic Outlook options remain
-              available below.
-            </p>
-            <p className="tiny">
-              Outlook Excel contains the same prepared emails and an Open all emails in Outlook button.
-              Use Excel for Windows with permitted VBA macros and Classic Outlook.
-              Opening status stays in the workbook; save it before closing to retain that status.
-            </p>
+            <p className="tiny">Review and send manually. Outlook Excel requires Excel for Windows, permitted macros and Classic Outlook.</p>
           </div>
           <div className="modal-footer">
             <Button
@@ -3500,18 +3318,6 @@ export default function App() {
           </div>
         </Modal>
       )}
-      {adminPanel && isAdmin && <Modal title="Admin controls" onClose={() => setAdminPanel(false)}>
-        <div className="modal-body">
-          <p className="muted">Signed in as {account.username} · Admin</p>
-          <div className="admin-shortcuts">
-            <Button variant="secondary" onClick={() => openAdminPage("users")}><Users size={18} /><span><strong>Manage users</strong><small>Create accounts and manage access.</small></span><ArrowRight size={16} /></Button>
-            <Button variant="secondary" onClick={() => openAdminPage("settings")}><SettingsIcon size={18} /><span><strong>Team email defaults</strong><small>Publish default subject and mail wording.</small></span><ArrowRight size={16} /></Button>
-            <Button variant="secondary" onClick={() => openAdminPage("sources")}><FileSpreadsheet size={18} /><span><strong>Manage source imports</strong><small>Upload sources or delete an import.</small></span><ArrowRight size={16} /></Button>
-            <Button variant="secondary" onClick={() => openAdminPage("hierarchy")}><Network size={18} /><span><strong>Manage hierarchy</strong><small>Download, upload or revise recipients.</small></span><ArrowRight size={16} /></Button>
-          </div>
-        </div>
-        <div className="modal-footer"><Button variant="secondary" onClick={() => setAdminPanel(false)}>Done</Button></div>
-      </Modal>}
       {login && (
         <Modal
           title="Connect your SBM workspace"
