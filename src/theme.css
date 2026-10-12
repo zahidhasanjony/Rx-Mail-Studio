@@ -213,9 +213,11 @@ input::placeholder, textarea::placeholder { color: #6f8194; }
   .topbar .breadcrumbs strong { color: white; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .topbar .breadcrumbs .icon-button { min-width: 36px; min-height: 36px; padding: 6px; flex-shrink: 0; }
   .topbar .breadcrumbs .icon-button svg { width: 18px; height: 18px; }
+  .topbar .breadcrumbs .icon-button:hover, .topbar .breadcrumbs .icon-button:active { color: white; background: #244663; }
   .topbar .top-actions { flex-wrap: nowrap; gap: 4px; margin-left: 0; flex-shrink: 0; }
   .topbar .mode-pill { padding: 5px 6px; font-size: 9px; gap: 4px; }
   .topbar .mode-pill.cloud-dot { width: 32px; min-width: 32px; height: 36px; padding: 0; }
+  .topbar .mode-pill.cloud-dot:hover { background: #244663; }
   .topbar .account-identity { font-size: 11px; gap: 0; max-width: 64px; overflow: hidden; }
   .topbar .account-identity small { color: #bfd6e7; font-size: 9px; }
   .topbar .top-account-action { min-height: 36px; padding: 5px 6px; font-size: 11px; color: white; }

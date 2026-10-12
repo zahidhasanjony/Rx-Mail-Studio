@@ -26,6 +26,7 @@ function preview(width, state = '') {
   const dom = new JSDOM(`<!doctype html><head><style>${css}</style></head><body>${fixture}</body>`);
   const active = dom.window.document.querySelector('.mobile-bottom button.active');
   if (state) active.classList.add(state);
+  if (state) for (const control of dom.window.document.querySelectorAll('.topbar button')) control.classList.add(state);
   return dom;
 }
 function color(dom, value) {
@@ -51,6 +52,9 @@ test('mobile top bar is compact and header plus selected navigation remain reada
       const background = color(dom, w.getComputedStyle(doc.querySelector('.topbar')).backgroundColor);
       for (const selector of ['.breadcrumbs strong', '.account-identity', '.account-identity small', '.top-account-action'])
         assert.ok(contrast(color(dom, w.getComputedStyle(doc.querySelector(selector)).color), background) >= 4.5, selector + ' must remain legible');
+      const menuStyle = w.getComputedStyle(doc.querySelector('.breadcrumbs .icon-button'));
+      const menuBackground = /transparent|rgba\([^)]*,\s*0\)/.test(menuStyle.backgroundColor) ? background : color(dom, menuStyle.backgroundColor);
+      assert.ok(contrast(color(dom, menuStyle.color), menuBackground) >= 4.5, 'Menu stays visible while tapping');
       assert.notEqual(w.getComputedStyle(doc.querySelector('.cloud-dot .status-dot')).display, 'none');
       const active = doc.querySelector('.mobile-bottom button.active'), style = w.getComputedStyle(active);
       assert.ok(contrast(color(dom, style.color), color(dom, style.backgroundColor)) >= 4.5, 'Active item contrast during ' + (state || 'selection'));
