@@ -194,12 +194,14 @@ input::placeholder, textarea::placeholder { color: #6f8194; }
 .settings-card > h2 { color: #16324f; }
 .toast { color: var(--rx-primary); border-color: var(--border); }
 .toast.error { color: var(--rx-red); border-color: #f5c3c9; }
-.outlook-connection details { margin-top: 16px; text-align: left; }
-.outlook-connection summary { cursor: pointer; font-weight: 600; }
-.outlook-connection details label { display: grid; gap: 6px; margin: 12px 0; font-size: 12px; }
-.outlook-connection code { overflow-wrap: anywhere; }
-.outlook-progress { display: grid; gap: 8px; margin-top: 12px; }
-.outlook-progress progress { width: 100%; accent-color: var(--rx-primary); }
+.android-region-choice { display: flex; align-items: center; gap: 16px; }
+.android-region-choice label { display: grid; gap: 8px; flex: 1; min-width: 0; }
+.android-envelope { margin: 16px 0; padding: 12px 16px; border-radius: 10px; background: var(--rx-blue-surface); overflow-wrap: anywhere; }
+.android-envelope p { margin: 6px 0; }
+.android-mail-actions, .android-queue-navigation { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+.android-mail-queue summary { cursor: pointer; }
+.android-mail-queue textarea { width: 100%; margin-top: 12px; font: inherit; }
+.android-mail-queue .button { min-height: 44px; }
 .outlook-error { color: var(--rx-red); }
 .brand-options button small, .brand-options > p { color: var(--muted); }
 .brand-options button.highlighted { background: var(--rx-mint); }

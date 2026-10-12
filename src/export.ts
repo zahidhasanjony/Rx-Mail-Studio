@@ -63,7 +63,7 @@ function foldedHeader(name: string, value: string) {
   }
   return output + line;
 }
-function plainText(html: string) {
+export function plainText(html: string) {
   return html
     .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
     .replace(/<br\s*\/?\s*>|<\/(?:p|div|h[1-6]|tr|table|li)>/gi, "\n")

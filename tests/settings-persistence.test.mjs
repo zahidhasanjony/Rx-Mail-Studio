@@ -39,7 +39,7 @@ test("personal signature defaults save through the production UI and survive reo
     Object.defineProperty(w, "indexedDB", { value: indexedDB });
     Object.defineProperty(w, "IDBKeyRange", { value: IDBKeyRange });
     Object.assign(w, { structuredClone, TextEncoder, TextDecoder, Blob });
-    w.eval(code.replaceAll("import.meta.resolve", "undefined").replaceAll("import.meta.url", '"https://rx-mail-studio.test/"'));
+    w.eval(code.replaceAll("import.meta.url", '"https://rx-mail-studio.test/"'));
     const button = text => [...w.document.querySelectorAll("button")].find(b => b.textContent.trim() === text || b.querySelector("span")?.textContent === text);
     const input = label => [...w.document.querySelectorAll("label.field")].find(l => l.querySelector("span")?.textContent === label)?.querySelector("input,textarea");
     const waitFor = async check => {
