@@ -15,6 +15,7 @@ async function readZip(
   onProgress: Progress,
   base = 0,
   range = 100,
+  afterChunk?: () => Promise<void>,
 ) {
   let failure: Error | undefined;
   const zip = new Unzip((entry) => {
@@ -45,6 +46,7 @@ async function readZip(
         const part = value.subarray(offset, offset + 65536);
         zip.push(part, false);
         if (failure) throw failure;
+        await afterChunk?.();
         read += part.length;
         onProgress(base + (read / file.size) * range, "Reading workbook");
         await new Promise((resolve) => setTimeout(resolve, 0));
@@ -224,6 +226,7 @@ export async function importRx(
   sheets: Sheet[],
   progress: Progress = () => {},
   generics?: string[],
+  onFacts?: (facts: RxFact[]) => Promise<void>,
 ): Promise<Dataset> {
   const hash = Array.from(
     new Uint8Array(
@@ -384,7 +387,18 @@ export async function importRx(
     progress,
     40,
     59,
+    onFacts ? async () => {
+      if (facts.size < 1000) return;
+      const batch = [...facts.values()];
+      facts.clear();
+      await onFacts(batch);
+    } : undefined,
   );
+  if (onFacts && facts.size) {
+    const batch = [...facts.values()];
+    facts.clear();
+    await onFacts(batch);
+  }
   if (from === "9999-12-31")
     throw new Error(
       "No valid prescription records found in the selected sheets.",

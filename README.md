@@ -94,3 +94,11 @@ Selected markets must be retained in active source data for every selected month
 Admins can delete a pair from **Brand library** after confirming the named pair. A database policy limits deletion to owners; editors and members cannot delete. A trigger records the deleted normalized brand/generic pair, and import discovery, catalogue refresh, startup defaults and device/cloud reconciliation skip these pairs. Stale inserts or updates cannot recreate a removed pair. Source facts and saved batches are preserved.
 
 Apply `supabase/migrations/20261017045737_brand_pair_deletion.sql` after `brand-catalogue.sql` before deploying the updated client. The migration was generated with the Supabase CLI and adds deletion markers, operation-specific policies and guarded catalogue insertion.
+
+## Mobile source imports and recovery
+
+Source review scans worksheet metadata without retaining prescription facts in memory. Cloud imports select all discovered generic markets by default; users can still narrow the selection. After confirmation, the import worker writes small batches to a separate IndexedDB staging store. Cloud saving reads those batches in generic/month order and sends at most 1,000 fact groups per request. The complete dataset never crosses the worker boundary or enters React reporting state. Equivalent Rx rows may be aggregated in separate batches; all counts are summed by the report engine.
+
+Staged record counts must match before `rxm_finish_import` activates the new source and archives overlapping versions. Failed uploads call the existing cleanup RPC and keep completed sources active. Successful/cancelled reviews remove their temporary device batches. Raw Excel remains on the device. Normal cloud reporting still loads only the selected markets.
+
+`/recover.html` opens independently of the React app. Its refresh button unregisters this app's service worker and removes only `rx-shell-` file caches; it preserves localStorage, IndexedDB workspace data and Supabase data. Startup HTML and the React error boundary provide a link to this page when the app cannot open.

@@ -319,3 +319,7 @@ input::placeholder, textarea::placeholder { color: #6f8194; }
 .template-error { color:var(--rx-red); margin:0; font-size:12px; }
 .preview-subject { border-top:1px solid var(--border); padding-top:5px; margin-top:5px; }
 @media(max-width:740px){.email-customization summary{padding:16px}.email-customization-body{padding:0 16px 16px}}
+.app-recovery { max-width: 480px; margin: 15vh auto; padding: 24px; color: #12314b; }
+.app-recovery h1 { font-size: 26px; }
+.app-recovery button, .app-recovery a { display: inline-block; margin: 10px 12px 10px 0; padding: 12px 16px; border-radius: 8px; }
+.app-recovery button { background: #007568; color: #fff; border: 0; cursor: pointer; }

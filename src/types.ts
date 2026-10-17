@@ -20,6 +20,9 @@ export interface RxFact {
   sheet: string;
 }
 export interface Dataset {
+  // Device-only import handoff. Never saved in the cloud dataset metadata.
+  stagedImportId?: string;
+  stagedFactCount?: number;
   id: string;
   name: string;
   hash: string;

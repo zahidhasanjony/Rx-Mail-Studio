@@ -7,6 +7,7 @@ import { reportingMonths } from "./reporting";
 import { templateError } from "./email-template";
 import type { EmailTemplate, Hierarchy } from "./types";
 import { normalize, overlaps } from "./engine";
+import { importFactBatches } from "./import-staging";
 export const cloudConfigured = Boolean(
   import.meta.env.VITE_SUPABASE_URL &&
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
@@ -243,7 +244,7 @@ export async function cloudSave(
     const old = previous.datasets.find((p) => p.id === d.id);
     if (!old) {
       onProgress("Saving import metadata");
-      const { facts, ...payload } = d;
+      const { facts, stagedImportId, stagedFactCount, ...payload } = d;
       const r = await supabase.from("rxm_datasets").insert({
         id: d.id,
         name: d.name,
@@ -257,30 +258,15 @@ export async function cloudSave(
       });
       fail(r.error);
       try {
-        const groups = new Map<string, RxFact[]>();
-        for (const fact of facts) {
-          const key = JSON.stringify([
-            fact.date.slice(0, 7),
-            normalize(fact.generic),
-          ]);
-          const g = groups.get(key) || [];
-          g.push(fact);
-          groups.set(key, g);
-        }
         let saved = 0;
-        for (const [key, list] of groups) {
-          const [month, generic] = JSON.parse(key);
-          for (let i = 0; i < list.length; i += 1000) {
-            const r = await supabase.from("rxm_fact_chunks").insert({
-              dataset_id: d.id,
-              month,
-              generic,
-              payload: list.slice(i, i + 1000),
-            });
-            fail(r.error);
-          }
-          onProgress(`Saving generic ${++saved} / ${groups.size}`);
+        for await (const batch of importFactBatches(d)) {
+          const r = await supabase.from("rxm_fact_chunks").insert({ dataset_id: d.id, ...batch });
+          fail(r.error);
+          saved += batch.payload.length;
+          onProgress(`Saving Rx records ${saved.toLocaleString()}${stagedFactCount !== undefined ? " / " + stagedFactCount.toLocaleString() : ""}`);
         }
+        if (stagedImportId && saved !== stagedFactCount)
+          throw new Error("The prepared import is incomplete. Select the original workbook again.");
         const replaceIds = previous.datasets
           .filter(
             (o) =>

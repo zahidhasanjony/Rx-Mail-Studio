@@ -48,6 +48,7 @@ import type {
   Mail as RegionalMail,
 } from "./types";
 import { emptyWorkspace, starterProfiles } from "./types";
+import { clearStagedImport } from "./import-staging";
 import {
   workspaceToday,
   coverage,
@@ -498,6 +499,7 @@ export default function App() {
     } | null>(null),
     [pendingSource, setPendingSource] = useState<Dataset | null>(null);
   const pendingImport = useRef<{ file: File; sheets: Sheet[] } | null>(null);
+  const pendingStaged = useRef<Dataset | null>(null);
   const [importMarkets, setImportMarkets] = useState<Set<string>>(new Set());
   const [hierarchyMap, setHierarchyMap] = useState<{
       name: string;
@@ -781,6 +783,7 @@ export default function App() {
       if (mode === "cloud") {
         const catalogue = await cloudSave(next, workspaceRef.current, setBusyText);
         if (catalogue) next = { ...next, ...catalogue };
+        next = { ...next, datasets: next.datasets.map(({ stagedImportId, stagedFactCount, ...dataset }) => dataset) };
       }
       workspaceRef.current = next;
       setWorkspace(next);
@@ -917,32 +920,20 @@ export default function App() {
         choice.selected.includes(s.path),
       );
       pendingImport.current = { file: choice.file, sheets: chosenSheets };
-      const initialScope = [
-        ...new Set([
-          ...starterProfiles.map((p) => p.generic),
-          ...workspace.datasets.flatMap((d) => d.includedGenerics || []),
-        ]),
-      ];
       const d = await runWorker<Dataset>(
         choice.file,
         "source",
         chosenSheets,
-        initialScope,
+        [],
       );
       if (d.invalidRows)
         throw new Error(
           `${num(d.invalidRows)} rows have missing doctor codes, generic names or invalid dates. Correct these rows and re-upload to keep the Rx totals accurate.`,
         );
-      setImportMarkets(
-        new Set(
-          [
-            ...starterProfiles.map((p) => p.generic),
-            ...workspace.datasets.flatMap((d) => d.includedGenerics || []),
-          ].filter((g) =>
-            datasetGenericNames(d).some(name => normalize(name) === normalize(g)),
-          ),
-        ),
-      );
+      const available = datasetGenericNames(d);
+      setImportMarkets(new Set(mode === "cloud" ? available :
+        [...new Set([...starterProfiles.map(p => p.generic), ...workspace.datasets.flatMap(ds => ds.includedGenerics || [])])]
+          .filter(g => available.some(name => normalize(name) === normalize(g)))));
       setPendingSource(d);
     } catch (e) {
       notify((e as Error).message, true);
@@ -986,11 +977,11 @@ export default function App() {
       );
       return;
     }
-    let source = pendingSource;
+    let source = pendingStaged.current || pendingSource;
+    const preparedScope = new Set(source.includedGenerics?.map(normalize));
+    const scopeMatches = preparedScope.size === scope.length && scope.every(g => preparedScope.has(normalize(g)));
     if (
-      scope.some(
-        (g) => !source.includedGenerics?.map(normalize).includes(normalize(g)),
-      )
+      (mode === "cloud" && (!source.stagedImportId || !scopeMatches)) || scope.some(g => !preparedScope.has(normalize(g)))
     ) {
       if (!pendingImport.current) {
         notify("Select the original workbook again to add markets.", true);
@@ -999,12 +990,17 @@ export default function App() {
       setBusy(true);
       setProgress(0);
       try {
+        if (pendingStaged.current?.stagedImportId) {
+          await clearStagedImport(pendingStaged.current.stagedImportId);
+          pendingStaged.current = null;
+        }
         source = await runWorker<Dataset>(
           pendingImport.current.file,
-          "source",
+          mode === "cloud" ? "source-staged" : "source",
           pendingImport.current.sheets,
           scope,
         );
+        if (source.stagedImportId) pendingStaged.current = source;
       } catch (e) {
         notify((e as Error).message, true);
         return;
@@ -1034,6 +1030,9 @@ export default function App() {
     const next = { ...workspace, datasets: [...datasets, d], profiles };
     if (await update(next)) {
       setPendingSource(null);
+      pendingImport.current = null;
+      pendingStaged.current = null;
+      if (source.stagedImportId) await clearStagedImport(source.stagedImportId).catch(() => {});
       setMonth(d.to.slice(0, 7));
       setEndMonth(d.to.slice(0, 7));
       setPage("generate");
@@ -2687,7 +2686,11 @@ export default function App() {
       {pendingSource && (
         <Modal
           title="Review your source import"
-          onClose={() => setPendingSource(null)}
+          onClose={() => {
+            setPendingSource(null); pendingImport.current = null;
+            if (pendingStaged.current?.stagedImportId) void clearStagedImport(pendingStaged.current.stagedImportId).catch(() => {});
+            pendingStaged.current = null;
+          }}
         >
           <div className="modal-body">
             <div className="success-symbol">
@@ -2750,9 +2753,8 @@ export default function App() {
                 ))}
             </div>
             <p className="tiny">
-              Default: your allergy markets. Saving selected markets reduces
-              cloud storage. Re-import this file with an expanded selection to
-              replace its saved version.
+              {mode === "cloud" ? "All generic markets are selected by default. Uncheck any you do not want to save." : "Select the markets to keep on this device, or use Select all."} A replacement import keeps the old version
+              active until the new data finishes saving.
             </p>
             {workspace.datasets.filter(
               (d) => d.active && overlaps(d, pendingSource),
@@ -2772,7 +2774,11 @@ export default function App() {
             )}
           </div>
           <div className="modal-footer">
-            <Button variant="secondary" onClick={() => setPendingSource(null)}>
+            <Button variant="secondary" onClick={() => {
+              setPendingSource(null); pendingImport.current = null;
+              if (pendingStaged.current?.stagedImportId) void clearStagedImport(pendingStaged.current.stagedImportId).catch(() => {});
+              pendingStaged.current = null;
+            }}>
               Cancel
             </Button>
             <Button onClick={() => commitSource(true)}>
