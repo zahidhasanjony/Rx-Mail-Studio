@@ -9,14 +9,27 @@ interface StagedChunk {
 }
 type ChunkKey = [string, string, string, number];
 
-async function stagingDb() {
+export async function stagingDb() {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open("rx-mail-studio-imports", 1);
-    request.onupgradeneeded = () => request.result.createObjectStore("chunks", {
-      keyPath: ["importId", "generic", "month", "sequence"],
-    });
-    request.onsuccess = () => resolve(request.result);
+    request.onupgradeneeded = () => request.result.createObjectStore("chunks", { keyPath: ["importId", "generic", "month", "sequence"] });
+    request.onsuccess = () => { request.result.onversionchange = () => request.result.close(); resolve(request.result); };
     request.onerror = () => reject(request.error);
+  });
+}
+
+// A separate DB avoids blocking an older app tab that still has the raw
+// staging database open while uploading.
+export async function uploadDb() {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open("rx-mail-studio-upload-jobs", 1);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore("parts", { keyPath: ["importId", "part"] });
+      request.result.createObjectStore("jobs", { keyPath: "id" });
+    };
+    request.onsuccess = () => { request.result.onversionchange = () => request.result.close(); resolve(request.result); };
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("Close older app tabs and try again."));
   });
 }
 
@@ -67,7 +80,7 @@ export async function* stagedChunks(importId: string): AsyncGenerator<StagedChun
   } finally { db.close(); }
 }
 
-export async function clearStagedImport(importId: string) {
+export async function clearRawStaging(importId: string) {
   const db = await stagingDb();
   try {
     await new Promise<void>((resolve, reject) => {
@@ -80,10 +93,25 @@ export async function clearStagedImport(importId: string) {
   } finally { db.close(); }
 }
 
+export async function clearStagedImport(importId: string) {
+  await clearRawStaging(importId);
+  const uploads = await uploadDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = uploads.transaction(["parts", "jobs"], "readwrite");
+      tx.objectStore("parts").delete(IDBKeyRange.bound([importId], [importId, Number.MAX_SAFE_INTEGER]));
+      tx.objectStore("jobs").delete(importId);
+      tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
+    });
+  } finally { uploads.close(); }
+}
+
 export async function* importFactBatches(dataset: Dataset) {
   let buffer: RxFact[] = [], generic = "", month = "";
   if (dataset.stagedImportId) {
+    const included = dataset.includedGenerics ? new Set(dataset.includedGenerics.map(g => g.trim().replace(/\s+/g, " ").toUpperCase())) : undefined;
     for await (const chunk of stagedChunks(dataset.stagedImportId)) {
+      if (included && !included.has(chunk.generic)) continue;
       if (buffer.length && (generic !== chunk.generic || month !== chunk.month)) {
         yield { generic, month, payload: buffer };
         buffer = [];

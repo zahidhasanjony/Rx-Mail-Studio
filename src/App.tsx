@@ -48,7 +48,10 @@ import type {
   Mail as RegionalMail,
 } from "./types";
 import { emptyWorkspace, starterProfiles } from "./types";
-import { clearStagedImport } from "./import-staging";
+import { clearStagedImport, clearRawStaging } from "./import-staging";
+import { loadUploadJobs, saveUploadJob, type UploadJob, type UploadManifest, type UploadProgress } from "./upload";
+import { pendingCloudImports, discardCloudImport, uploadCloudSource } from "./cloud-upload";
+import { UploadPanel } from "./UploadPanel";
 import {
   workspaceToday,
   coverage,
@@ -500,6 +503,12 @@ export default function App() {
     [pendingSource, setPendingSource] = useState<Dataset | null>(null);
   const pendingImport = useRef<{ file: File; sheets: Sheet[] } | null>(null);
   const pendingStaged = useRef<Dataset | null>(null);
+  const [uploadJob, setUploadJob] = useState<UploadJob | null>(null);
+  const [uploadView, setUploadView] = useState<UploadProgress | null>(null);
+  const [unfinishedImports, setUnfinishedImports] = useState<{ id: string; name: string; imported_at: string }[]>([]);
+  const uploadControl = useRef<AbortController | null>(null);
+  const sourcePreparing = useRef(false);
+  const importRunning = !!uploadView && ["preparing", "uploading", "verifying"].includes(uploadView.phase);
   const [importMarkets, setImportMarkets] = useState<Set<string>>(new Set());
   const [hierarchyMap, setHierarchyMap] = useState<{
       name: string;
@@ -533,6 +542,17 @@ export default function App() {
     worker = useRef<Worker | null>(null),
     workspaceRef = useRef(workspace);
   const notify = (text: string, error = false) => setToast({ text, error });
+  useEffect(() => {
+    if (mode !== "cloud" || !account || !["owner", "editor"].includes(account.role)) return;
+    let alive = true;
+    setUploadJob(null); setUploadView(null);
+    Promise.all([loadUploadJobs(account.id), pendingCloudImports()]).then(([jobs, pending]) => {
+      if (!alive) return;
+      setUnfinishedImports(pending);
+      if (jobs[0]) { setUploadJob(jobs[0]); setUploadView({ phase: "paused", saved: 0, total: jobs[0].manifest.records, percent: -1, message: "Saved progress will be checked when you resume." }); }
+    }).catch(e => { if (alive) notify((e as Error).message, true); });
+    return () => { alive = false; uploadControl.current?.abort(); };
+  }, [mode, account?.id]);
   useEffect(() => {
     workspaceRef.current = workspace;
     setSettingsDraft(workspace.settings);
@@ -813,10 +833,11 @@ export default function App() {
     }
   }
   function runWorker<T>(
-    file: File,
+    file: File | undefined,
     action: string,
     sheets?: Sheet[],
     generics?: string[],
+    dataset?: Dataset,
   ): Promise<T> {
     return new Promise((resolve, reject) => {
       worker.current?.terminate();
@@ -828,6 +849,7 @@ export default function App() {
         if (e.data.type === "progress") {
           setProgress(e.data.percent);
           setBusyText(e.data.message);
+          if (sourcePreparing.current) setUploadView({ phase: "preparing", saved: 0, total: 0, percent: e.data.percent, message: e.data.message });
         } else {
           w.terminate();
           worker.current = null;
@@ -846,7 +868,7 @@ export default function App() {
           ),
         );
       };
-      w.postMessage({ file, action, sheets, generics });
+      w.postMessage({ file, action, sheets, generics, dataset });
     });
   }
   async function selectFile(
@@ -854,6 +876,7 @@ export default function App() {
     kind: "source" | "hierarchy",
   ) {
     if (!file) return;
+    if (sourcePreparing.current || (kind === "source" && (importRunning || uploadJob))) { notify("Finish or discard the current source import before starting another.", true); return; }
     if (kind === "hierarchy" && !isAdmin) { notify("Only admins can upload or change the hierarchy.", true); return; }
     if (mode === "demo") {
       notify("Switch to your device workspace to import real data.", true);
@@ -910,7 +933,9 @@ export default function App() {
   }
   async function processSource() {
     if (!sourcePicker) return;
-    setBusy(true);
+    if (mode !== "cloud") setBusy(true);
+    sourcePreparing.current = mode === "cloud";
+    if (sourcePreparing.current) setUploadView({ phase: "preparing", saved: 0, total: 0, percent: 0 });
     setBusyText("Preparing import");
     setProgress(0);
     const choice = sourcePicker;
@@ -922,9 +947,9 @@ export default function App() {
       pendingImport.current = { file: choice.file, sheets: chosenSheets };
       const d = await runWorker<Dataset>(
         choice.file,
-        "source",
+        mode === "cloud" ? "source-staged" : "source",
         chosenSheets,
-        [],
+        mode === "cloud" ? undefined : [],
       );
       if (d.invalidRows)
         throw new Error(
@@ -935,11 +960,43 @@ export default function App() {
         [...new Set([...starterProfiles.map(p => p.generic), ...workspace.datasets.flatMap(ds => ds.includedGenerics || [])])]
           .filter(g => available.some(name => normalize(name) === normalize(g)))));
       setPendingSource(d);
+      if (d.stagedImportId) pendingStaged.current = d;
     } catch (e) {
       notify((e as Error).message, true);
     } finally {
+      sourcePreparing.current = false;
+      if (mode === "cloud") setUploadView(null);
       setBusy(false);
     }
+  }
+  async function resumeSourceUpload(job: UploadJob) {
+    if (uploadControl.current) return;
+    const controller = new AbortController(); uploadControl.current = controller;
+    setUploadJob(job);
+    setUploadView({ phase: "uploading", saved: 0, total: job.manifest.records, percent: 0 });
+    try {
+      const library = await uploadCloudSource(job, controller.signal, setUploadView);
+      if (controller.signal.aborted) return;
+      setWorkspace(w => { const next = { ...w, ...library }; workspaceRef.current = next; return next; });
+      await clearStagedImport(job.id).catch(() => {});
+      setUnfinishedImports(rows => rows.filter(row => row.id !== job.source.id));
+      setUploadJob(null); setMonth(job.source.to.slice(0, 7)); setEndMonth(job.source.to.slice(0, 7));
+      notify("Source import verified and activated.");
+    } catch (error) {
+      const paused = controller.signal.aborted;
+      setUploadView(p => ({ phase: paused ? "paused" : "failed", saved: p?.saved || 0, total: job.manifest.records, percent: p?.percent || 0, message: paused ? undefined : (error as Error).message }));
+      void pendingCloudImports().then(setUnfinishedImports).catch(() => {});
+    } finally { uploadControl.current = null; }
+  }
+  async function discardSourceUpload(id: string, localJob?: UploadJob) {
+    if (importRunning || !window.confirm("Discard this unfinished upload? Completed sources and saved emails will be kept.")) return;
+    try {
+      await discardCloudImport(id);
+      if (localJob) await clearStagedImport(localJob.id);
+      setUnfinishedImports(rows => rows.filter(row => row.id !== id));
+      if (uploadJob?.source.id === id) { setUploadJob(null); setUploadView(null); }
+      notify("Unfinished upload discarded. You can upload the original file again.");
+    } catch (error) { notify((error as Error).message, true); }
   }
   async function commitSource(replace: boolean) {
     if (!pendingSource) return;
@@ -977,11 +1034,30 @@ export default function App() {
       );
       return;
     }
+    if (mode === "cloud") {
+      if (!account || !pendingSource.stagedImportId) { notify("Select the original workbook again to prepare this upload.", true); return; }
+      const source = { ...pendingSource, hash: scopeDigest, sourceHash, includedGenerics: scope, facts: [] };
+      sourcePreparing.current = true;
+      setUploadView({ phase: "preparing", saved: 0, total: 0, percent: 0 });
+      setPendingSource(null);
+      try {
+        const manifest = await runWorker<UploadManifest>(undefined, "prepare-upload", undefined, undefined, source);
+        const job: UploadJob = { id: source.stagedImportId!, ownerId: account.id, source, manifest, createdAt: new Date().toISOString() };
+        await saveUploadJob(job);
+        await clearRawStaging(job.id).catch(() => {});
+        pendingImport.current = null; pendingStaged.current = null;
+        sourcePreparing.current = false;
+        void resumeSourceUpload(job);
+      } catch (error) {
+        setUploadView({ phase: "failed", saved: 0, total: 0, percent: 0, message: (error as Error).message });
+        setPendingSource(source); notify((error as Error).message, true);
+      } finally { sourcePreparing.current = false; }
+      return;
+    }
     let source = pendingStaged.current || pendingSource;
     const preparedScope = new Set(source.includedGenerics?.map(normalize));
-    const scopeMatches = preparedScope.size === scope.length && scope.every(g => preparedScope.has(normalize(g)));
     if (
-      (mode === "cloud" && (!source.stagedImportId || !scopeMatches)) || scope.some(g => !preparedScope.has(normalize(g)))
+      scope.some(g => !preparedScope.has(normalize(g)))
     ) {
       if (!pendingImport.current) {
         notify("Select the original workbook again to add markets.", true);
@@ -996,7 +1072,7 @@ export default function App() {
         }
         source = await runWorker<Dataset>(
           pendingImport.current.file,
-          mode === "cloud" ? "source-staged" : "source",
+          "source",
           pendingImport.current.sheets,
           scope,
         );
@@ -1395,6 +1471,18 @@ export default function App() {
           </div>
         </header>
         <main>
+          {mode === "cloud" && uploadView && (!uploadJob || uploadJob.ownerId === account?.id) && <UploadPanel
+            name={uploadJob?.source.name || pendingImport.current?.file.name || "Source workbook"}
+            progress={uploadView}
+            onPause={() => uploadControl.current?.abort()}
+            onResume={uploadJob ? () => { void resumeSourceUpload(uploadJob); } : undefined}
+            onDiscard={uploadJob ? () => { void discardSourceUpload(uploadJob.source.id, uploadJob); } : undefined}
+            onDismiss={() => setUploadView(null)}
+          />}
+          {mode === "cloud" && page === "sources" && unfinishedImports.filter(row => row.id !== uploadJob?.source.id).map(row => <div className="notice warning" key={row.id}>
+            <span><strong>{row.name}</strong> · Unfinished upload. Completed reports are unchanged.</span>
+            <button disabled={importRunning} onClick={() => { void discardSourceUpload(row.id); }}>Discard unfinished upload</button>
+          </div>)}
           {mode === "demo" && (
             <div className="notice sample">
               <FlaskConical size={17} />
@@ -1440,7 +1528,7 @@ export default function App() {
             {page === "sources" ? (
               <Button
                 onClick={() => sourceInput.current?.click()}
-                disabled={busy}
+                disabled={busy || importRunning || !!uploadJob}
               >
                 <Plus size={17} />
                 Upload MRW file

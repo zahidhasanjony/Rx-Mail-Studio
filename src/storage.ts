@@ -147,7 +147,7 @@ export async function cloudLoad(): Promise<Workspace> {
   const values = await Promise.all([
     supabase
       .from("rxm_datasets")
-      .select("*")
+      .select("id,active,payload")
       .eq("complete", true)
       .order("imported_at", { ascending: false }),
     supabase

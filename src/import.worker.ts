@@ -1,5 +1,6 @@
 import { inspectWorkbook, importRx, readSheetRows } from "./excel";
 import { stageFacts, clearStagedImport } from "./import-staging";
+import { prepareUpload } from "./upload";
 self.onmessage = async (e) => {
   const { file, action, sheets, generics } = e.data;
   try {
@@ -11,6 +12,11 @@ self.onmessage = async (e) => {
         self.postMessage({ type: "progress", percent, message });
       }
     };
+    if (action === "prepare-upload") {
+      const result = await prepareUpload(e.data.dataset, done => progress(0, `Preparing upload batches · ${done.toLocaleString()} records`));
+      self.postMessage({ type: "result", result });
+      return;
+    }
     if (action === "source-staged") {
       const stagedImportId = crypto.randomUUID();
       let sequence = 0, stagedFactCount = 0;
@@ -19,7 +25,7 @@ self.onmessage = async (e) => {
           sequence = await stageFacts(stagedImportId, sequence, facts);
           stagedFactCount += facts.length;
         });
-        self.postMessage({ type: "result", result: { ...result, stagedImportId, stagedFactCount } });
+        self.postMessage({ type: "result", result: { ...result, includedGenerics: generics || result.availableGenerics, stagedImportId, stagedFactCount } });
       } catch (error) {
         await clearStagedImport(stagedImportId).catch(() => {});
         throw error;

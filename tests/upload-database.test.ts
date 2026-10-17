@@ -1,0 +1,51 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile, readdir } from 'node:fs/promises';
+import { PGlite } from '@electric-sql/pglite';
+import { hashUploadText } from '../src/upload';
+
+test('Postgres verifies resumable chunks, owner isolation, retries and atomic activation', async () => {
+  const db = new PGlite();
+  const owner='11111111-1111-4111-8111-111111111111', editor='22222222-2222-4222-8222-222222222222', member='33333333-3333-4333-8333-333333333333';
+  try {
+    await db.exec(`create role anon;create role authenticated;create schema auth;create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz,is_anonymous boolean default false);create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;create function auth.jwt() returns jsonb language sql stable as $$select jsonb_build_object('email',current_setting('request.jwt.claim.email',true))$$;grant usage on schema auth to authenticated;grant execute on function auth.uid(),auth.jwt() to authenticated;`);
+    const migration = (await readdir(new URL('../supabase/migrations/',import.meta.url))).find(name => name.endsWith('_resumable_source_upload.sql'))!;
+    for (const file of ['schema.sql','admin-reporting.sql','brand-catalogue.sql','migrations/20261017045737_brand_pair_deletion.sql','migrations/'+migration]) await db.exec(await readFile(new URL('../supabase/'+file,import.meta.url),'utf8'));
+    await db.exec(`insert into auth.users(id,email,email_confirmed_at) values('${owner}','owner@example.com',now()),('${editor}','editor@example.com',now()),('${member}','member@example.com',now());insert into public.rxm_members(email,role) values('editor@example.com','editor'),('member@example.com','member');`);
+    const identity = async(id:string,email:string) => { await db.exec(`reset role;select set_config('request.jwt.claim.sub','${id}',false);select set_config('request.jwt.claim.email','${email}',false);set role authenticated;`); };
+    const call = async(name:string,...values:unknown[]) => (await db.query(`select public.${name}(${values.map((_,i)=>'$'+(i+1)).join(',')}) as result`,values.map(v=>name==='rxm_finish_import'&&Array.isArray(v)?'{'+v.join(',')+'}':typeof v==='object'?JSON.stringify(v):v))).rows[0] as {result:any};
+    await identity(owner,'owner@example.com');
+    const old='44444444-4444-4444-8444-444444444444', id='55555555-5555-4555-8555-555555555555';
+    await db.exec(`insert into public.rxm_datasets(id,name,hash,from_date,to_date,imported_at,payload) values('${old}','Old','old','2026-07-01','2026-07-31',now(),'{}');insert into public.rxm_fact_chunks(dataset_id,month,generic,payload) values('${old}','2026-07','TEST','[{"count":1}]');`);
+    await call('rxm_finish_import',old);
+    const texts = ['Tramadol Hydrochloride','Paracetamol+Tramadol Hydrochloride'].map((generic,i)=>JSON.stringify([{generic,date:'2026-07-01',count:i+2,doctorName:'বাংলা 😀, "quoted"\nline',sourceRow:2,sourceRows:[2,3]}]));
+    const parts = await Promise.all(texts.map(async(t,part)=>({part,hash:await hashUploadText(t),generic:JSON.parse(t)[0].generic.toUpperCase(),month:'2026-07',records:1,rx:part+2,bytes:new TextEncoder().encode(t).length})));
+    const manifest = {version:1,records:2,rx:5,parts};
+    const source = {id,name:'New',hash:'new',from:'2026-07-01',to:'2026-07-31',importedAt:new Date().toISOString(),includedGenerics:parts.map(p=>p.generic),catalog:[]};
+    assert.equal((await call('rxm_begin_upload',source,manifest)).result.uploaded.length,0);
+    await assert.rejects(call('rxm_finish_import',id,[old]),/incomplete|No prescription chunks/);
+    assert.equal((await db.query<{active:boolean}>(`select active from public.rxm_datasets where id='${old}'`)).rows[0].active,true,'failed verification rolls back archiving');
+    await assert.rejects(db.exec(`insert into public.rxm_fact_chunks(dataset_id,month,generic,payload) values('${id}','2026-07','TEST','[]')`),/row-level security/);
+    await call('rxm_upload_batch',id,[{part:0,payload:JSON.parse(texts[0])}]);
+    await assert.rejects(call('rxm_finish_import',id,[old]),/incomplete/);
+    await call('rxm_upload_batch',id,[{part:0,payload:JSON.parse(texts[0])}]);
+    const state=(await call('rxm_begin_upload',source,manifest)).result;
+    assert.equal(state.uploaded.length,1,'retry stores exactly one copy');
+    await assert.rejects(call('rxm_upload_batch',id,[{part:1,payload:JSON.parse(texts[0])}]),/checksum/);
+    await assert.rejects(call('rxm_begin_upload',source,{...manifest,rx:9}),/totals/);
+    await identity(editor,'editor@example.com');
+    await assert.rejects(call('rxm_begin_upload',source,manifest),/another account/);
+    await assert.rejects(call('rxm_upload_batch',id,[{part:1,payload:JSON.parse(texts[1])}]),/access denied/);
+    await identity(member,'member@example.com');
+    await assert.rejects(call('rxm_begin_upload',source,manifest),/Import access required/);
+    await identity(owner,'owner@example.com');
+    await call('rxm_upload_batch',id,[{part:1,payload:JSON.parse(texts[1])}]);
+    await call('rxm_finish_import',id,[old]);
+    assert.equal((await call('rxm_begin_upload',source,manifest)).result.complete,true,'completion can be recovered after losing its response');
+    assert.equal((await db.query<{rx:number}>(`select sum(upload_rx)::int as rx,count(*)::int as chunks from public.rxm_fact_chunks where dataset_id='${id}'`)).rows[0].rx,5);
+    assert.equal((await db.query<{active:boolean}>(`select active from public.rxm_datasets where id='${old}'`)).rows[0].active,false);
+    assert.equal((await db.query(`update public.rxm_fact_chunks set upload_rx=100 where dataset_id='${id}' returning id`)).rows.length,0,'checked chunks are not editable through the Data API');
+    await db.exec('reset role;set role anon');
+    await assert.rejects(call('rxm_begin_upload',source,manifest),/permission denied/);
+  } finally { await db.close(); }
+});

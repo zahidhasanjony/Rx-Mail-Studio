@@ -8,8 +8,9 @@ import { build } from "vite";
 import { JSDOM } from "jsdom";
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 import { stageFacts } from "../src/import-staging.ts";
+import { prepareUpload } from "../src/upload.ts";
 
-test("compiled cloud upload reviews metadata, selects every generic and uploads staged facts", async () => {
+test("compiled cloud upload scans once, stays usable, pauses and resumes without duplicating records", async () => {
   const output = await mkdtemp(join(tmpdir(), "rxm-import-ui-"));
   let dom;
   try {
@@ -19,12 +20,15 @@ test("compiled cloud upload reviews metadata, selects every generic and uploads 
     const code = await readFile(join(output, js), "utf8");
     dom = new JSDOM('<div id="root"></div>', { url: "https://rxmail.vercel.app/", runScripts: "outside-only", pretendToBeVisual: true });
     const w = dom.window, errors = [], actions = [], requests = [], sources = [], chunks = [];
+    let releaseBatch;
+    const holdBatch = new Promise(resolve => { releaseBatch = resolve; });
+    let savedManifest;
     const account = { id: "11111111-1111-4111-8111-111111111111", username: "ADMIN", name: "Test", role: "owner", active: true };
     const jwt = [Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url"), Buffer.from(JSON.stringify({ sub: account.id, email: "owner@example.com", exp: Math.floor(Date.now()/1000)+3600, role: "authenticated" })).toString("base64url"), Buffer.alloc(32, 1).toString("base64url")].join(".");
     w.localStorage.setItem("sb-rx-project-auth-token", JSON.stringify({ access_token: jwt, refresh_token: "test-refresh", token_type: "bearer", expires_at: Math.floor(Date.now()/1000)+3600, expires_in: 3600, user: { id: account.id, email: "owner@example.com" } }));
     Object.assign(globalThis, { indexedDB, IDBKeyRange });
     Object.defineProperty(w, "crypto", { value: webcrypto }); Object.defineProperty(w, "indexedDB", { value: indexedDB }); Object.defineProperty(w, "IDBKeyRange", { value: IDBKeyRange });
-    Object.assign(w, { structuredClone, TextEncoder, TextDecoder, Blob, Headers, Request, Response, AbortSignal });
+    Object.assign(w, { structuredClone, TextEncoder, TextDecoder, Blob, Headers, Request, Response, AbortSignal, AbortController });
     w.addEventListener('error', e => errors.push(e.message));
     const metadata = { id: crypto.randomUUID(), name: 'July.xlsx', hash: 'file-hash', active: true, importedAt: '2026-10-17', from: '2026-07-01', to: '2026-07-31', dates: ['2026-07-01'], rows: 6, invalidRows: 0, catalog: [], facts: [], sheets: ["TRD JULY'26"], includedGenerics: [], availableGenerics: ['Paracetamol+Tramadol Hydrochloride', 'Tramadol Hydrochloride', 'Competitor-only generic'], regions: { ACD: [], CCD: [] } };
     w.Worker = class {
@@ -35,14 +39,14 @@ test("compiled cloud upload reviews metadata, selects every generic and uploads 
           try {
             let result;
             if (message.action === 'inspect') result = [{ name: "TRD JULY'26", path: 'xl/worksheets/sheet1.xml' }];
-            else if (message.action === 'source') { assert.deepEqual(Array.from(message.generics), []); result = metadata; }
+            else if (message.action === 'prepare-upload') result = await prepareUpload(message.dataset);
             else {
               assert.equal(message.action, 'source-staged');
-              assert.deepEqual([...message.generics].sort(), [...metadata.availableGenerics].sort());
+              assert.equal(message.generics, undefined, 'one source pass retains every market before review');
               const stagedImportId = crypto.randomUUID();
               const facts = metadata.availableGenerics.map((generic, i) => ({ date: '2026-07-01', generic, brand: i === 0 ? 'NAPADOL' : 'COMPETITOR', company: 'Test', form: 'TAB', doctorCode: 'D' + i, doctorName: 'Test', specialty: 'Medicine', acdRegion: 'D5', acdMpe: 'D501', ccdRegion: 'D6', ccdMpe: 'D601', count: i + 1, sheet: "TRD JULY'26", sourceRow: i + 2 }));
               await stageFacts(stagedImportId, 0, facts);
-              result = { ...metadata, includedGenerics: message.generics, stagedImportId, stagedFactCount: facts.length };
+              result = { ...metadata, includedGenerics: metadata.availableGenerics, stagedImportId, stagedFactCount: facts.length };
             }
             this.onmessage({ data: { type: 'result', result } });
           } catch (error) { this.onmessage({ data: { type: 'error', message: error.message } }); }
@@ -58,7 +62,17 @@ test("compiled cloud upload reviews metadata, selects every generic and uploads 
       if (url.pathname.endsWith('/rxm_members')) return response([{ email: 'owner@example.com', role: 'owner' }]);
       if (url.pathname.endsWith('/rxm_datasets')) { if (options?.method === 'POST') { sources.push(body); return response([]); } return response(sources); }
       if (url.pathname.endsWith('/rxm_fact_chunks')) { if (options?.method === 'POST') { chunks.push(body); return response([]); } return response(chunks); }
-      if (url.pathname.endsWith('/rxm_finish_import')) { sources.find(d => d.id === body.dataset).active = true; return response(null); }
+      if (url.pathname.endsWith('/rxm_begin_upload')) {
+        if (!sources.length) sources.push({ id: body.source.id, active: false, complete: false, payload: body.source });
+        savedManifest = body.manifest;
+        return response({ complete: sources[0].complete, uploaded: chunks.map(c => ({ part: c.upload_part, hash: savedManifest.parts[c.upload_part].hash })) });
+      }
+      if (url.pathname.endsWith('/rxm_upload_batch')) {
+        await holdBatch;
+        for (const part of body.parts) chunks.push({ dataset_id: body.dataset, upload_part: part.part, payload: part.payload });
+        return response(null);
+      }
+      if (url.pathname.endsWith('/rxm_finish_import')) { const row = sources.find(d => d.id === body.dataset); row.active = true; row.complete = true; return response(null); }
       return response([]);
     };
     const waitFor = async check => { for (let i = 0; i < 250; i++) { if (check()) return; await new Promise(r => setTimeout(r, 15)); } assert.fail(w.document.body.textContent.slice(-1500) + errors.join(';')); };
@@ -75,8 +89,18 @@ test("compiled cloud upload reviews metadata, selects every generic and uploads 
     assert.equal(w.document.querySelectorAll('.scope-list input:checked').length, 3);
     assert.ok(!requests.some(r => r.method === 'POST' && r.path.endsWith('/rxm_datasets')), 'review does not upload anything');
     button('Confirm import').click();
-    await waitFor(() => requests.some(r => r.path.endsWith('/rxm_finish_import')) && !w.document.querySelector('.busy-overlay'));
-    assert.deepEqual(actions, ['inspect', 'source', 'source-staged']);
+    await waitFor(() => requests.some(r => r.path.endsWith('/rxm_upload_batch')));
+    assert.ok(!w.document.querySelector('.busy-overlay'), 'upload does not block the app');
+    button('Brand library').click();
+    await waitFor(() => w.document.querySelector('.page-heading h1').textContent.trim() === 'Brand library');
+    button('Pause upload').click(); releaseBatch();
+    await waitFor(() => button('Resume upload'));
+    assert.ok(!requests.some(r => r.path.endsWith('/rxm_finish_import')));
+    assert.ok(w.document.body.textContent.includes('Upload paused'));
+    button('Resume upload').click();
+    await waitFor(() => w.document.body.textContent.includes('Import complete'));
+    assert.deepEqual(actions, ['inspect', 'source-staged', 'prepare-upload']);
+    assert.equal(requests.filter(r => r.path.endsWith('/rxm_upload_batch')).length, 1, 'resume skips every server-acknowledged part');
     assert.equal(chunks.flatMap(c => c.payload).reduce((n, f) => n + f.count, 0), 6);
     assert.equal(sources[0].payload.stagedImportId, undefined);
     assert.equal(sources[0].payload.facts, undefined);
