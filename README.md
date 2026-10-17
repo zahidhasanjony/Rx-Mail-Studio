@@ -82,3 +82,15 @@ Brand Library has a Search button for brand/generic names and a Clear action. Su
 New emails use black greeting, opening and comparison text. The default opening is `Please find below the prescription share of {Brand} and prescribers list of {Generic} in {Region} Region for {Period}.` Existing custom wording remains editable. Both the comparison percentage and the own-brand tile percentage use red below the national benchmark and green at/above it, using unrounded Rx counts. Missing benchmarks use black. Signature styling and doctor marking remain as before.
 
 To/CC exports contain bare email addresses. Personal team/boss CC comes first in saved order, followed by hierarchy CC; duplicate addresses and the To address are removed case-insensitively. EML uses standard comma-separated mailbox headers; the preview displays semicolons. Outlook may resolve addresses to contact names using its own address book. Generate a new batch for the revised body and CC ordering; previously prepared HTML remains frozen.
+
+## Multiple target generics and admin brand-pair deletion
+
+On **Generate emails**, choose the target brand, expand **Target generics**, and check additional generic markets. The brand's direct generic remains selected. **Use own generic only** restores the original behavior. With multiple markets, **All forms in selected markets** includes their dosage forms; a specific form can still be selected.
+
+Counts use the union of selected markets. National, regional, ASE/MPE and doctor shares divide the target brand's Rx by the selected-market Rx total, and combined reports state that scope explicitly. Each doctor is merged within the same structure, region and MPE using the doctor code. Own-brand Rx belongs to the direct generic and its explicit aliases. Subjects, openings and batch labels include the selected market names. Saved batches keep a copy of the selected scope and frozen HTML.
+
+Selected markets must be retained in active source data for every selected month/cycle. Older imports may need re-importing with the additional market checked. New imports discover every generic in the source, including competitor-only markets, independently of Beximco brand-pair discovery. Raw spreadsheets remain on the device.
+
+Admins can delete a pair from **Brand library** after confirming the named pair. A database policy limits deletion to owners; editors and members cannot delete. A trigger records the deleted normalized brand/generic pair, and import discovery, catalogue refresh, startup defaults and device/cloud reconciliation skip these pairs. Stale inserts or updates cannot recreate a removed pair. Source facts and saved batches are preserved.
+
+Apply `supabase/migrations/20261017045737_brand_pair_deletion.sql` after `brand-catalogue.sql` before deploying the updated client. The migration was generated with the Supabase CLI and adds deletion markers, operation-specific policies and guarded catalogue insertion.

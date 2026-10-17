@@ -1,5 +1,6 @@
 import { defaultEmailTemplate } from "./types";
 import type { BrandProfile, EmailTemplate, HierarchyRow, RegionReport, Settings } from "./types";
+import { marketLabel } from "./markets";
 
 export const sectionTokens = ["RegionalShare", "ASEShare", "MPEShare", "Prescribers"] as const;
 const textTokens = ["Generic", "Brand", "Region", "Structure", "Period", "RSE"];
@@ -24,7 +25,7 @@ export function templateError(template: EmailTemplate) {
   }
 }
 export function emailVariables(report: RegionReport, profile: BrandProfile, period: string, contact: HierarchyRow) {
-  return { Generic: profile.generic, Brand: profile.brand, Region: report.region,
+  return { Generic: marketLabel(profile), Brand: profile.brand, Region: report.region,
     Structure: report.structure, Period: period, RSE: contact.salutation.replace(/\s*Bhai$/i, "") };
 }
 export function fillEmailText(text: string, variables: ReturnType<typeof emailVariables>) {

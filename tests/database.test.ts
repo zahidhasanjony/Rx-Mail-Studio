@@ -17,6 +17,7 @@ test("Postgres schema enforces verified team membership, private settings and ov
     await db.exec(await readFile(new URL("../supabase/username-auth.sql", import.meta.url), "utf8"));
     await db.exec(await readFile(new URL("../supabase/admin-reporting.sql", import.meta.url), "utf8"));
     await db.exec(await readFile(new URL("../supabase/brand-catalogue.sql", import.meta.url), "utf8"));
+    await db.exec(await readFile(new URL("../supabase/migrations/20261017045737_brand_pair_deletion.sql", import.meta.url), "utf8"));
     const owner = "11111111-1111-4111-8111-111111111111",
       member = "22222222-2222-4222-8222-222222222222",
       outsider = "33333333-3333-4333-8333-333333333333";
@@ -87,6 +88,8 @@ test("Postgres schema enforces verified team membership, private settings and ov
     const editor = "77777777-7777-4777-8777-777777777777";
     await db.exec(`reset role;insert into auth.users(id,email,email_confirmed_at) values('${editor}','editor@example.com',now());insert into public.rxm_members values('editor@example.com','editor',now());insert into public.rxm_accounts(user_id,username,display_name,login_email,password_salt) values('${editor}','EDITOR','Editor','editor@example.com',repeat('e',64))`);
     await identity(editor,"editor@example.com");
+    assert.equal((await db.query("delete from public.rxm_profiles where id='later' returning id")).rows.length,0,"Editors cannot delete brand pairs");
+    await assert.rejects(db.exec("insert into public.rxm_deleted_brand_pairs(generic,brand,profile_id,payload) values('X','X','x','{}')"),/row-level security/);
     await assert.rejects(db.query("select public.rxm_refresh_catalogue()"),/Admin access required/);
     await assert.rejects(db.query("select rxm_private.add_profiles('[]')"),/permission denied/);
     assert.equal((await db.query(`delete from public.rxm_datasets where id='${second}' returning id`)).rows.length,0,"Editors cannot delete library sources");
@@ -104,6 +107,17 @@ test("Postgres schema enforces verified team membership, private settings and ov
     await db.exec(`insert into public.rxm_datasets(id,name,hash,from_date,to_date,imported_at,payload) values('${failed}','Retry','retry','2026-08-01','2026-08-10',now(),'{}');insert into public.rxm_fact_chunks(dataset_id,month,generic,payload) values('${failed}','2026-08','KETOTIFEN','[{"count":1}]')`);
     await db.query(`select public.rxm_finish_import('${failed}')`);
     assert.equal((await db.query<{ complete: boolean }>(`select complete from public.rxm_datasets where id='${failed}'`)).rows[0].complete,true,"Editors can still complete imports");
+    await identity(owner,"owner@example.com");
+    await db.query("delete from public.rxm_profiles where id='later'");
+    assert.equal((await db.query("select * from public.rxm_deleted_brand_pairs where generic='NEW GENERIC' and brand='LATERBEX'")).rows.length,1);
+    await db.query("select public.rxm_refresh_catalogue()");
+    assert.equal((await db.query("select * from public.rxm_profiles where payload->>'brand'='LATERBEX'")).rows.length,0,"Source refresh cannot recreate a deleted pair");
+    await db.query("select public.rxm_add_brand_profiles($1)",[JSON.stringify([{id:'recreated',generic:'new  generic',brand:' laterbex ',forms:['TAB']}])]);
+    assert.equal((await db.query("select * from public.rxm_profiles where id='recreated'")).rows.length,0,"Stale automatic add calls skip deleted pairs");
+    await assert.rejects(db.query("insert into public.rxm_profiles(id,payload) values('resurrect',$1)",[JSON.stringify({id:'resurrect',generic:'New Generic',brand:'LATERBEX',forms:[]})]),/deleted by an admin/);
+    await identity(editor,"editor@example.com");
+    await assert.rejects(db.query("update public.rxm_profiles set payload=$1 where id='tofen'",[JSON.stringify({generic:'NEW GENERIC',brand:'LATERBEX',forms:[]})]),/deleted by an admin/);
+    assert.equal((await db.query("delete from public.rxm_deleted_brand_pairs returning profile_id")).rows.length,0,"Editors cannot erase deletion markers");
     await identity(owner,"owner@example.com");
     await db.exec(`update public.rxm_workspace_defaults set payload='{"subject":"Team default","opening":"Text","body":"Text"}' where id='email';delete from public.rxm_datasets where id='${first}';delete from public.rxm_datasets where id='${failed}'`);
     assert.equal((await db.query(`select * from public.rxm_batches`)).rows.length,1,"Source deletion preserves frozen history");

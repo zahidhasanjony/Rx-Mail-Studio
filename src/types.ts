@@ -25,6 +25,7 @@ export interface Dataset {
   hash: string;
   sourceHash?: string;
   includedGenerics?: string[];
+  availableGenerics?: string[];
   importedAt: string;
   active: boolean;
   rows: number;
@@ -47,6 +48,7 @@ export interface BrandProfile {
   forms: string[];
   favorite?: boolean;
   aliases?: string[];
+  targetGenerics?: string[];
 }
 export interface Contact {
   title?: string;
@@ -168,6 +170,7 @@ export interface Batch {
   doctorSelection?: DoctorSelection;
 }
 export interface Workspace {
+  deletedBrandPairs?: string[];
   persistedProfileIds?: string[];
   sharedEmailTemplate?: EmailTemplate;
   datasets: Dataset[];

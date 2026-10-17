@@ -13,6 +13,7 @@ import type {
   TerritoryRxShare,
 } from "./types";
 import { emailTemplateFor, emailVariables, fillEmailText, templateError } from "./email-template";
+import { reportGenericNames, targetGenericNames, marketLabel } from "./markets";
 export const normalize = (v: unknown) =>
   String(v ?? "")
     .trim()
@@ -62,8 +63,9 @@ export function nationalRxShare(
   endMonth = month,
 ): NationalRxShare {
   const sources = eligibleDatasets(datasets, month, endMonth).filter(d => !d.includedGenerics ||
-    d.includedGenerics.some(g => [profile.generic, ...(profile.aliases || [])].map(normalize).includes(normalize(g))));
-  const generics = new Set([profile.generic, ...(profile.aliases || [])].map(normalize));
+    d.includedGenerics.some(g => reportGenericNames(profile).includes(normalize(g))));
+  const generics = new Set(reportGenericNames(profile));
+  const ownGenerics = new Set([profile.generic, ...(profile.aliases || [])].map(normalize));
   const forms = new Set(profile.forms.map(normalize));
   let total = 0, own = 0;
   for (const ds of sources) {
@@ -71,7 +73,7 @@ export function nationalRxShare(
       if (!dateInPeriod(f.date, month, period, endMonth)) continue;
       if (!generics.has(normalize(f.generic)) || (forms.size && !forms.has(normalize(f.form)))) continue;
       total += f.count;
-      if (normalize(f.brand) === normalize(profile.brand)) own += f.count;
+      if (ownGenerics.has(normalize(f.generic)) && normalize(f.brand) === normalize(profile.brand)) own += f.count;
     }
   }
   // Recipient hierarchy coverage controls regional sending, not source-wide Rx totals.
@@ -124,10 +126,9 @@ export function reports(
       mpes: Map<string, TerritoryRxShare>;
     }
   >();
-  const genericNames = [profile.generic, ...(profile.aliases || [])].map(
-      normalize,
-    ),
+  const genericNames = reportGenericNames(profile),
     forms = profile.forms.map(normalize);
+  const ownGenerics = new Set([profile.generic, ...(profile.aliases || [])].map(normalize));
   const national = nationalRxShare(datasets, month, profile, period, [], endMonth);
   for (const ds of eligibleDatasets(datasets, month, endMonth))
     for (const f of ds.facts) {
@@ -147,13 +148,14 @@ export function reports(
           r = { structure, region, brands: {}, doctors: new Map(), ases: new Map(), mpes: new Map() };
           maps.set(key, r);
         }
-        const b = normalize(f.brand) || "UNBRANDED";
+        const ownBrand = ownGenerics.has(normalize(f.generic)) && normalize(f.brand) === normalize(profile.brand);
+        const b = normalize(f.brand) === normalize(profile.brand) && !ownBrand ? normalize(f.brand) + " (" + normalize(f.generic) + ")" : normalize(f.brand) || "UNBRANDED";
         const ase = (structure === "ACD" ? f.acdAse : f.ccdAse) ?? ds.aseByMpe?.[structure]?.[JSON.stringify([region, mpe])];
         for (const [groups, code] of [[r.ases, ase], [r.mpes, mpe]] as const) {
           const groupCode = code || "Unassigned";
           const group = groups.get(groupCode) || { code: groupCode, genericCount: 0, ownCount: 0 };
           group.genericCount += f.count;
-          if (b === normalize(profile.brand)) group.ownCount += f.count;
+          if (ownBrand) group.ownCount += f.count;
           groups.set(groupCode, group);
         }
         r.brands[b] = (r.brands[b] || 0) + f.count;
@@ -172,7 +174,7 @@ export function reports(
           r.doctors.set(dk, d);
         }
         d.genericCount += f.count;
-        if (b === normalize(profile.brand)) d.ownCount += f.count;
+        if (ownBrand) d.ownCount += f.count;
         else d.otherBrands[b] = (d.otherBrands[b] || 0) + f.count;
       }
     }
@@ -395,11 +397,12 @@ export function emailHtml(
   if (error) throw new Error(error);
   const variables = emailVariables(report, profile, month, contact);
   const paragraph = (text: string) => text.trim() ? `<p style="margin:0 0 14px;line-height:1.6;color:#000000">${e(fillEmailText(text, variables)).replace(/\r?\n/g, "<br>")}</p>` : "";
+  const combined = targetGenericNames(profile).length > 1;
   const sections: Record<string, string> = {
-    RegionalShare: `<div data-email-section="RegionalShare"><p style="font-weight:bold;margin:0 0 12px;color:#000000">Regional Rx share</p><p data-national-comparison="true" style="margin:0 0 14px;line-height:1.6;color:#000000">The National Rx share of <b>${e(profile.brand)}</b> is <b>${benchmark}</b> whereas yours is <b data-regional-share="true" style="color:${comparisonColor}">${regionalShare}</b>.</p><table role="presentation" style="font-family:${mailFontFamily};border-collapse:collapse;width:100%;table-layout:fixed"><tr>${shares}</tr></table><p style="font-size:11px;color:#566b80;margin:8px 0 18px">Share of all ${e(profile.generic)} Rx · Total ${report.total}</p></div>`,
+    RegionalShare: `<div data-email-section="RegionalShare"><p style="font-weight:bold;margin:0 0 12px;color:#000000">Regional Rx share${combined ? " · Combined selected markets" : ""}</p><p data-national-comparison="true" style="margin:0 0 14px;line-height:1.6;color:#000000">The National Rx share of <b>${e(profile.brand)}</b> is <b>${benchmark}</b> whereas yours is <b data-regional-share="true" style="color:${comparisonColor}">${regionalShare}</b>.</p><table role="presentation" style="font-family:${mailFontFamily};border-collapse:collapse;width:100%;table-layout:fixed"><tr>${shares}</tr></table><p style="font-size:11px;color:#566b80;margin:8px 0 18px">Share of all ${e(marketLabel(profile))} Rx · Total ${report.total}</p></div>`,
     ASEShare: territoryShareHtml("ASE", profile.brand, report.aseShares, national),
     MPEShare: territoryShareHtml("MPE", profile.brand, report.mpeShares, national),
-    Prescribers: `<div data-email-section="Prescribers"><p style="font-weight:bold;margin:0 0 12px">Prescriber list</p><table aria-label="Prescriber list" style="font-family:${mailFontFamily};border-collapse:collapse;table-layout:fixed;width:100%;font-size:12px"><thead><tr>${["MPE", "Doctor code", "Doctor name", "Specialty", "Generic Rx", profile.brand + " Rx", profile.brand + " share", "Other Brand"].map((h, i) => head(h, [0, 3, 7].includes(i), [6, 10, 20, 10, 8, 8, 10, 28][i])).join("")}</tr></thead><tbody>${rows}</tbody></table>${national?.available ? `<p style="font-size:11px;color:#b42335;margin:10px 0 20px">↓ Red = below national ${e(profile.brand)} share (${benchmark}).</p>` : '<p style="font-size:11px;color:#566b80;margin:10px 0 20px">National benchmark unavailable.</p>'}</div>`,
+    Prescribers: `<div data-email-section="Prescribers"><p style="font-weight:bold;margin:0 0 12px">Prescriber list</p><table aria-label="Prescriber list" style="font-family:${mailFontFamily};border-collapse:collapse;table-layout:fixed;width:100%;font-size:12px"><thead><tr>${["MPE", "Doctor code", "Doctor name", "Specialty", combined ? "Selected markets Rx" : "Generic Rx", profile.brand + " Rx", profile.brand + " share", "Other Brand"].map((h, i) => head(h, [0, 3, 7].includes(i), [6, 10, 20, 10, 8, 8, 10, 28][i])).join("")}</tr></thead><tbody>${rows}</tbody></table>${national?.available ? `<p style="font-size:11px;color:#b42335;margin:10px 0 20px">↓ Red = below national ${e(profile.brand)} share (${benchmark}).</p>` : '<p style="font-size:11px;color:#566b80;margin:10px 0 20px">National benchmark unavailable.</p>'}</div>`,
   };
   const body = template.body.split(/(\{(?:RegionalShare|ASEShare|MPEShare|Prescribers)\})/g)
     .map(part => /^\{(?:RegionalShare|ASEShare|MPEShare|Prescribers)\}$/.test(part) ? sections[part.slice(1, -1)] : paragraph(part)).join("");

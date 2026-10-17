@@ -74,6 +74,18 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
     assert.equal(initialFormat.value, "excel", "Outlook Excel is the default download");
     assert.ok(button("Android mail · 6"), "Android generation has a separate button");
     assert.equal(button("Android mail · 6").disabled, false, "sample data can preview the individual queue");
+    const ownGeneric = w.document.querySelector('[aria-label="Target generic Ketotifen"]');
+    assert.ok(ownGeneric.checked && ownGeneric.disabled, "the target brand's own generic is always retained");
+    w.document.querySelector('[aria-label="Target generic Bilastine"]').click();
+    await waitFor(() => w.document.body.textContent.includes('Selected markets: Ketotifen + Bilastine'));
+    w.document.querySelector('[aria-label="Preview D5 email"]').click();
+    await waitFor(() => w.document.querySelector('iframe'));
+    assert.match(w.document.querySelector('.preview-subject').textContent,/Ketotifen \+ Bilastine/);
+    assert.match(w.document.querySelector('iframe').srcdoc,/Combined selected markets/);
+    button('Done').click();
+    await waitFor(() => button('Use own generic only'));
+    button('Use own generic only').click();
+    await waitFor(() => !w.document.querySelector('[aria-label="Target generic Bilastine"]').checked);
     initialFormat.value = "eml";
     initialFormat.dispatchEvent(new w.Event("change", { bubbles: true }));
     await new Promise(resolve => setTimeout(resolve, 20));

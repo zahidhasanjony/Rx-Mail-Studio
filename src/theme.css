@@ -107,6 +107,13 @@ input::placeholder, textarea::placeholder { color: #6f8194; }
 .queue-footer > span { color: var(--muted); font-size: 11px; }
 .batch-download-choice { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .batch-download-choice select { width: auto; min-width: 165px; }
+.generic-target-picker { min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.generic-target-picker summary { cursor: pointer; font-size: 12px; font-weight: 600; }
+.generic-target-picker > input { width: 100%; margin: 10px 0 4px; }
+.generic-target-list { max-height: 220px; overflow-y: auto; }
+.generic-target-list .sheet-choice { margin: 4px 0; padding: 8px 0; font-size: 12px; }
+.brand-card-footer .danger { color: var(--rx-red); }
+.brand-card-footer { flex-wrap: wrap; gap: 10px; }
 .help-line { color: var(--muted); font-size: 12px; }
 .region-review { position: sticky; top: 20px; }
 .region-review .card-header { border-bottom: 0; padding-bottom: 16px; }

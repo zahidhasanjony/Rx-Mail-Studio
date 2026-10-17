@@ -235,6 +235,7 @@ export async function importRx(
   const strings = await sharedStrings(file, progress),
     facts = new Map<string, RxFact>(),
     catalog = new Map<string, BrandProfile>(),
+    availableGenerics = new Set<string>(),
     dates = new Set<string>(),
     regions = { ACD: new Set<string>(), CCD: new Set<string>() },
     aseParents = { ACD: new Map<string, Set<string>>(), CCD: new Map<string, Set<string>>() },
@@ -283,6 +284,7 @@ export async function importRx(
           return;
         }
         from = date < from ? date : from;
+        availableGenerics.add(generic);
         to = date > to ? date : to;
         const f: RxFact = {
           date,
@@ -393,6 +395,7 @@ export async function importRx(
     name: file.name,
     hash,
     includedGenerics: generics,
+    availableGenerics: [...availableGenerics].sort(),
     importedAt: new Date().toISOString(),
     active: true,
     rows,

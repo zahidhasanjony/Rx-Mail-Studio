@@ -96,6 +96,13 @@ test("catalogue discovery includes Beximco pairs outside the retained Rx markets
   assert.equal(imported.facts[0].count,2);
   assert.equal(imported.catalog.find(p => p.brand === "NEWBEX")?.company,"Beximco Pharmaceuticals PLC");
   assert.ok(!imported.catalog.some(p => p.brand === "COMPETITOR"));
+  assert.ok(imported.availableGenerics?.includes("Montelukast"), "Generic discovery is independent of the retained Rx scope");
+  archive["xl/worksheets/sheet1.xml"] = xml(strFromU8(archive["xl/worksheets/sheet1.xml"]).replace("</sheetData>",row(6,"Other company","COMPETITOR-ONLY").replace("Montelukast","Tramadol")+"</sheetData>"));
+  const expandedFile = new File([zipSync(archive) as unknown as BlobPart],"extra-market.xlsx");
+  const expanded = await importRx(expandedFile,await inspectWorkbook(expandedFile),()=>{},["Ketotifen","Tramadol"]);
+  assert.ok(expanded.availableGenerics?.includes("Tramadol"));
+  assert.ok(expanded.facts.some(f=>f.generic==="Tramadol"), "Competitor-only generic prescribers can be imported");
+  assert.ok(!expanded.catalog.some(p=>p.generic==="Tramadol"), "Competitor-only generic does not create an own-brand pair");
 });
 test("ASE columns are preserved and legacy mappings require one verified parent", async () => {
   const file = workbook(true);

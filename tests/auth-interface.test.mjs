@@ -28,8 +28,9 @@ test("compiled login restores the cloud indicator, preserves admin page access a
       const jwt = [Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url"), Buffer.from(JSON.stringify({ sub: account.id, email: "owner@example.com", exp: Math.floor(Date.now()/1000)+3600, role: "authenticated" })).toString("base64url"), Buffer.alloc(32, 1).toString("base64url")].join(".");
       const accounts = [account];
       const sample = demoWorkspace();
-      const sourceRows = sample.datasets.map(d => ({ id: d.id, active: d.active, complete: true, payload: d }));
+      const sourceRows = sample.datasets.map(d => ({ id: d.id, active: d.active, complete: true, payload: { ...d, includedGenerics: ['Ketotifen'], availableGenerics: ['Ketotifen','Bilastine'] } }));
       const profileRows = [{ id: "cloud-only", payload: { id: "cloud-only", brand: "CLOUD ONLY", generic: "Example Generic", forms: ["TAB"] } }];
+      const deletedPairs = [];
       const requests = [];
       let sharedTemplate = { ...defaultEmailTemplate };
 
@@ -53,7 +54,17 @@ test("compiled login restores the cloud indicator, preserves admin page access a
             if (options?.method === "DELETE") return response([{ id: sourceRows.pop().id }]);
             return response(sourceRows);
           }
-          if (url.pathname.endsWith("/rxm_profiles")) return response(profileRows);
+          if (url.pathname.endsWith("/rxm_deleted_brand_pairs")) return response(deletedPairs);
+          if (url.pathname.endsWith("/rxm_profiles")) {
+            if (options?.method === "DELETE") {
+              const index = profileRows.findIndex(row => 'eq.' + row.id === url.searchParams.get('id'));
+              if (index < 0) return response([]);
+              const [row] = profileRows.splice(index,1);
+              deletedPairs.push({generic:row.payload.generic,brand:row.payload.brand});
+              return response([{id:row.id}]);
+            }
+            return response(profileRows);
+          }
           if (url.pathname.endsWith("/rxm_refresh_catalogue")) {
             if (profileRows.some(p => p.id === "manual-new")) return response(0);
             profileRows.push({ id: "manual-new", payload: { id: "manual-new", brand: "NEWBEX", generic: "New Generic", company: "BEXIMCO", forms: ["TAB"] } });
@@ -120,12 +131,25 @@ test("compiled login restores the cloud indicator, preserves admin page access a
         assert.equal(w.document.querySelector('.brand-card h2').textContent,'TOFEN');
         button("Clear").click(); await waitFor(() => w.document.querySelectorAll('.brand-card').length === 9);
         assert.equal(!!button("Update catalogue"),role === "owner");
+        assert.equal(w.document.querySelectorAll('[aria-label^="Delete brand pair "]').length > 0, role === 'owner');
         if (role === "owner") {
           button("Update catalogue").click();
           await waitFor(() => [...w.document.querySelectorAll('.brand-card h2')].some(h => h.textContent === 'NEWBEX'));
           button("Update catalogue").click();
           await waitFor(() => w.document.body.textContent.includes('No new Beximco pairs found'));
           assert.equal(w.document.querySelectorAll('.brand-card').length,10);
+          w.document.querySelector('[aria-label="Delete brand pair CLOUD ONLY Example Generic"]').click();
+          await waitFor(() => button('Delete brand pair'));
+          assert.match(w.document.querySelector('.modal').textContent,/saved email batches stay available/);
+          button('Cancel').click();
+          assert.ok(!requests.some(r=>r.method==='DELETE' && r.path.endsWith('rxm_profiles')));
+          w.document.querySelector('[aria-label="Delete brand pair CLOUD ONLY Example Generic"]').click();
+          await waitFor(() => button('Delete brand pair')); button('Delete brand pair').click();
+          await waitFor(() => !w.document.querySelector('[aria-label="Delete brand pair CLOUD ONLY Example Generic"]'));
+          assert.equal(w.document.querySelectorAll('.brand-card').length,9);
+          button('Update catalogue').click();
+          await waitFor(() => w.document.body.textContent.includes('No new Beximco pairs found'));
+          assert.ok(![...w.document.querySelectorAll('.brand-card h2')].some(h=>h.textContent==='CLOUD ONLY'));
         }
         button("Settings").click();
         await waitFor(() => button("Save my defaults"));
@@ -156,7 +180,7 @@ test("compiled login restores the cloud indicator, preserves admin page access a
           await waitFor(() => button("Delete source"));
           assert.match(w.document.querySelector(".modal").textContent, /batch history remain available/);
           button("Cancel").click();
-          assert.ok(!requests.some(r => r.method === "DELETE"), "Cancel leaves the source in place");
+          assert.ok(!requests.some(r => r.method === "DELETE" && r.path.endsWith("rxm_datasets")), "Cancel leaves the source in place");
           button("Delete").click(); await waitFor(() => button("Delete source")); button("Delete source").click();
           await waitFor(() => !w.document.querySelector(".source-row"));
           assert.ok(requests.some(r => r.method === "DELETE" && r.path.endsWith("rxm_datasets")));

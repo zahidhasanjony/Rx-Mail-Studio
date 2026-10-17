@@ -12,3 +12,4 @@ dist/
 
 *.tsbuildinfo
 __pycache__/
+supabase/.temp/

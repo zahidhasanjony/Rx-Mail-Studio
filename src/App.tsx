@@ -78,6 +78,7 @@ import {
   cloudPublishEmailTemplate,
   cloudDeleteSource,
   cloudExportHierarchy,
+  cloudDeleteBrandPair,
 } from "./storage";
 import type { Mode } from "./storage";
 import { usernameSignIn, currentAccount, AccountServiceError } from "./auth";
@@ -93,6 +94,7 @@ import { hierarchyColumns, mapHierarchy, extraHierarchyCcMappings } from "./exce
 import type { Sheet, HierarchyCcMapping } from "./excel";
 import { parseCsv } from "./csv";
 import { appendBrandPairs, reconcileBrandPairs, sourceBrandPairs, brandPairKey, searchBrandPairs } from "./catalogue";
+import { datasetGenericNames, reportGenericNames, targetGenericNames, marketLabel, missingMarketCoverage } from "./markets";
 import { reportingMonths, reportingPeriod } from "./reporting";
 import { demoWorkspace } from "./demo";
 import {
@@ -457,6 +459,9 @@ export default function App() {
     );
   const [brandSearch, setBrandSearch] = useState(""), [brandSearchDraft, setBrandSearchDraft] = useState("");
   const [batchDownload, setBatchDownload] = useState<"eml" | "excel">("excel");
+  const [extraGenerics, setExtraGenerics] = useState<Record<string, string[]>>({});
+  const [genericSearch, setGenericSearch] = useState("");
+  const [deleteBrand, setDeleteBrand] = useState<BrandProfile | null>(null);
   const [excelDownloading, setExcelDownloading] = useState(false);
   const selectedBrand = useRef<BrandProfile>(starterProfiles[0]);
   const [month, setMonth] = useState("2026-06"),
@@ -610,15 +615,29 @@ export default function App() {
     if (profile) { selectedBrand.current = profile; if (profileId !== profile.id) setProfileId(profile.id); }
   }, [profile, profileId]);
   const visibleBrandPairs = searchBrandPairs(workspace.profiles, brandSearch);
+  const additionalGenerics = profile ? extraGenerics[profile.id] || [] : [];
+  const genericOptions = useMemo(() => {
+    const names = [...workspace.profiles.map(p => p.generic), ...workspace.datasets.flatMap(datasetGenericNames), ...additionalGenerics];
+    const unique = new Map<string, string>();
+    for (const name of names) if (name.trim()) unique.set(normalize(name), name);
+    return [...unique.values()].sort((a, b) => a.localeCompare(b));
+  }, [workspace.profiles, workspace.datasets, additionalGenerics.join("|")]);
+  const formsForSelection = useMemo(() => {
+    if (!profile) return [];
+    if (!additionalGenerics.length) return profile.forms;
+    const names = new Set(reportGenericNames({ ...profile, targetGenerics: additionalGenerics }));
+    return [...new Set(workspace.datasets.flatMap(d => [...d.catalog.filter(p => names.has(normalize(p.generic))).flatMap(p => p.forms), ...d.facts.filter(f => names.has(normalize(f.generic))).map(f => f.form)]).filter(Boolean))].sort();
+  }, [profile, additionalGenerics.join("|"), workspace.datasets]);
   const marketProfile = useMemo(() => profile ? {
-    ...profile, forms: dosageForm === "all" || !profile.forms.includes(dosageForm) ? profile.forms : [dosageForm],
-  } : undefined, [profile, dosageForm]);
+    ...profile, targetGenerics: additionalGenerics,
+    forms: dosageForm !== "all" && formsForSelection.includes(dosageForm) ? [dosageForm] : additionalGenerics.length ? [] : profile.forms,
+  } : undefined, [profile, dosageForm, additionalGenerics.join("|"), formsForSelection]);
   useEffect(() => setDosageForm("all"), [profileId]);
   useEffect(() => {
     if (mode !== "cloud" || !profile) return;
     let alive = true;
     setLoading(true);
-    cloudHydrate(workspaceRef.current.datasets, month, profile, endMonth)
+    cloudHydrate(workspaceRef.current.datasets, month, marketProfile!, endMonth)
       .then((ds) => {
         if (alive) {
           setWorkspace((w) => ({ ...w, datasets: ds }));
@@ -640,6 +659,7 @@ export default function App() {
     endMonth,
     profile?.generic,
     profile?.aliases?.join(","),
+    additionalGenerics.join("|"),
     workspace.datasets.map((d) => d.id + ":" + d.active).join(","),
   ]);
   const structureList: Structure[] =
@@ -648,8 +668,7 @@ export default function App() {
     (d) =>
       !d.includedGenerics ||
       d.includedGenerics.some((g) =>
-        [profile?.generic, ...(profile?.aliases || [])]
-          .map(normalize)
+        (marketProfile ? reportGenericNames(marketProfile) : [])
           .includes(normalize(g)),
       ),
   );
@@ -663,7 +682,9 @@ export default function App() {
   const missingMonths = selectedMonths.filter(m => !selectedDays.some(date => date.startsWith(m)));
   const rangeError = !selectedMonths.length ? "Choose a valid From month and To month." : missingMonths.length ?
     `No source coverage for ${missingMonths.map(m => reportingPeriod(m)).join(", ")} in this cycle. Upload or activate the matching MRW sources.` : undefined;
-  const compositionError = wordingError || rangeError;
+  const missingMarkets = marketProfile ? missingMarketCoverage(workspace.datasets, selectedMonths, marketProfile, period) : [];
+  const marketCoverageError = missingMarkets.length ? `Import or activate ${[...new Set(missingMarkets.map(m => m.generic))].join(", ")} for every selected month and cycle.` : undefined;
+  const compositionError = wordingError || rangeError || marketCoverageError;
   const currentHierarchy = hierarchyFor(
     workspace.hierarchies,
     workspaceToday(),
@@ -918,7 +939,7 @@ export default function App() {
             ...starterProfiles.map((p) => p.generic),
             ...workspace.datasets.flatMap((d) => d.includedGenerics || []),
           ].filter((g) =>
-            d.catalog.some((p) => normalize(p.generic) === normalize(g)),
+            datasetGenericNames(d).some(name => normalize(name) === normalize(g)),
           ),
         ),
       );
@@ -991,12 +1012,13 @@ export default function App() {
         setBusy(false);
       }
     }
+    const retainedScope = new Set(scope.map(normalize));
     const d = {
       ...source,
       sourceHash,
       hash: scopeDigest,
       includedGenerics: scope,
-      facts: source.facts.filter((f) => importMarkets.has(f.generic)),
+      facts: source.facts.filter((f) => retainedScope.has(normalize(f.generic))),
     };
     const conflicts = workspace.datasets.filter(
       (o) => o.active && overlaps(o, d),
@@ -1008,7 +1030,7 @@ export default function App() {
     const datasets = workspace.datasets.map((o) =>
       conflicts.some((c) => c.id === o.id) ? { ...o, active: false } : o,
     );
-    const profiles = appendBrandPairs(workspace.profiles, sourceBrandPairs([d]));
+    const profiles = appendBrandPairs(workspace.profiles, sourceBrandPairs([d]), workspace.deletedBrandPairs);
     const next = { ...workspace, datasets: [...datasets, d], profiles };
     if (await update(next)) {
       setPendingSource(null);
@@ -1066,7 +1088,7 @@ export default function App() {
         endMonth,
         period,
         brand: profile.brand,
-        generic: profile.generic,
+        generic: marketLabel(marketProfile),
         sourceIds: activeSources.map((d) => d.id),
         hierarchyId: currentHierarchy!.id,
         settings: structuredClone(composeSettings),
@@ -1224,7 +1246,7 @@ export default function App() {
       if (result?.error) throw result.error;
       setAccount(null); setUserEmail("");
       setPassword(""); setUsername(""); setLogin(false);
-      setPreview(null); setBatchModal(null); setDeleteSource(null);
+      setPreview(null); setBatchModal(null); setDeleteSource(null); setDeleteBrand(null);
       setHierarchyMap(null); setPendingHierarchy(null); setEditingRow(null);
       workspaceRef.current = emptyWorkspace(); setWorkspace(emptyWorkspace()); setMode("local");
       await switchLocal();
@@ -1237,7 +1259,7 @@ export default function App() {
     setBusy(true); setBusyText("Checking imported Beximco catalogues");
     try {
       const result = await cloudUpdateCatalogue();
-      const next = { ...workspaceRef.current, profiles: reconcileBrandPairs(result.profiles, workspaceRef.current.datasets), persistedProfileIds: result.profiles.map(p => p.id) };
+      const next = { ...workspaceRef.current, ...result, profiles: reconcileBrandPairs(result.profiles, workspaceRef.current.datasets, result.deletedBrandPairs) };
       workspaceRef.current = next; setWorkspace(next);
       notify(result.added ? `${result.added} new Beximco brand pair${result.added === 1 ? "" : "s"} added. Existing pairs kept unchanged.` : "No new Beximco pairs found.");
     } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
@@ -1508,10 +1530,26 @@ export default function App() {
                       <option value="third">21–month end</option>
                     </select>
                   </Field>
+                  <details className="generic-target-picker">
+                    <summary>Target generics · {marketProfile ? targetGenericNames(marketProfile).length : 0}</summary>
+                    <input aria-label="Search target generics" placeholder="Search generic" value={genericSearch} onChange={e => setGenericSearch(e.target.value)} />
+                    <div className="generic-target-list">
+                      {genericOptions.filter(g => !genericSearch || normalize(g).includes(normalize(genericSearch))).map(g => {
+                        const primary = normalize(g) === normalize(profile?.generic);
+                        return <label key={normalize(g)} className="sheet-choice"><input type="checkbox" aria-label={`Target generic ${g}`} disabled={primary || !profile} checked={primary || additionalGenerics.some(value => normalize(value) === normalize(g))} onChange={e => {
+                          if (!profile) return;
+                          const next = additionalGenerics.filter(value => normalize(value) !== normalize(g));
+                          setExtraGenerics({ ...extraGenerics, [profile.id]: e.target.checked ? [...next, g] : next });
+                          setDosageForm("all");
+                        }} />{g}{primary ? " (own generic)" : ""}</label>;
+                      })}
+                    </div>
+                    {additionalGenerics.length > 0 && <button className="text-link" onClick={() => { if (profile) setExtraGenerics({ ...extraGenerics, [profile.id]: [] }); setDosageForm("all"); }}>Use own generic only</button>}
+                  </details>
                   <Field label="Dosage form">
                     <select value={dosageForm} onChange={e => setDosageForm(e.target.value)} aria-label="Dosage form">
-                      <option value="all">{profile?.forms.join(" + ") || "All forms"}</option>
-                      {profile?.forms.map(form => <option key={form} value={form}>{form}</option>)}
+                      <option value="all">{additionalGenerics.length ? "All forms in selected markets" : profile?.forms.join(" + ") || "All forms"}</option>
+                      {formsForSelection.map(form => <option key={form} value={form}>{form}</option>)}
                     </select>
                   </Field>
                   <Field label="Specialty">
@@ -1553,6 +1591,8 @@ export default function App() {
                 </div>
               </section>
               {rangeError && <div className="notice benchmark-notice" role="status"><AlertCircle size={17} /><span>{rangeError}</span></div>}
+              {marketCoverageError && !rangeError && <div className="notice benchmark-notice" role="status"><AlertCircle size={17} /><span>{marketCoverageError}</span></div>}
+              {additionalGenerics.length > 0 && <p className="notice">Selected markets: {marketProfile && marketLabel(marketProfile)}. Rx shares use the combined selected-market total.</p>}
               <details className="card email-customization">
                 <summary>Customize email subject &amp; body</summary>
                 <div className="email-customization-body">
@@ -2108,6 +2148,7 @@ export default function App() {
                         {!p.forms.length && <span>All forms</span>}
                       </div>
                       <div className="brand-card-footer">
+                        {isAdmin && <button className="text-link danger" disabled={busy} aria-label={`Delete brand pair ${p.brand} ${p.generic}`} onClick={() => setDeleteBrand(p)}><Trash2 size={14} />Delete</button>}
                         <button
                           className="text-link"
                           onClick={() => {
@@ -2454,7 +2495,7 @@ export default function App() {
                                 ),
                             ),
                           ],
-                          profiles: appendBrandPairs(existing.profiles, workspace.profiles),
+                          profiles: appendBrandPairs(existing.profiles, workspace.profiles, existing.deletedBrandPairs),
                           settings: { ...workspace.settings, emailTemplate: existing.settings.emailTemplate },
                           batches: [
                             ...workspace.batches,
@@ -2677,7 +2718,7 @@ export default function App() {
                 className="text-link"
                 onClick={() =>
                   setImportMarkets(
-                    new Set(pendingSource.catalog.map((p) => p.generic)),
+                    new Set(datasetGenericNames(pendingSource)),
                   )
                 }
               >
@@ -2691,7 +2732,7 @@ export default function App() {
               </button>
             </div>
             <div className="scope-list">
-              {[...new Set(pendingSource.catalog.map((p) => p.generic))]
+              {datasetGenericNames(pendingSource)
                 .sort()
                 .map((g) => (
                   <label className="sheet-choice" key={g}>
@@ -2741,6 +2782,20 @@ export default function App() {
           </div>
         </Modal>
       )}
+      {deleteBrand && isAdmin && <Modal title="Delete brand pair?" onClose={() => !busy && setDeleteBrand(null)}>
+        <div className="modal-body"><p>Delete <strong>{deleteBrand.brand} · {deleteBrand.generic}</strong> from the Brand Library?</p><p className="muted">Future imports will not add this pair again. Source data and saved email batches stay available.</p></div>
+        <div className="modal-footer"><Button variant="secondary" disabled={busy} onClick={() => setDeleteBrand(null)}>Cancel</Button><Button variant="danger" disabled={busy} onClick={async () => {
+          if (!isAdmin) return;
+          setBusy(true); setBusyText("Deleting brand pair");
+          try {
+            const catalogue = await cloudDeleteBrandPair(deleteBrand.id);
+            const next = { ...workspaceRef.current, ...catalogue, profiles: reconcileBrandPairs(catalogue.profiles, workspaceRef.current.datasets, catalogue.deletedBrandPairs) };
+            workspaceRef.current = next; setWorkspace(next); setDeleteBrand(null);
+            notify("Brand pair deleted. Saved batches are unchanged.");
+          } catch (error) { notify((error as Error).message, true); }
+          finally { setBusy(false); }
+        }}><Trash2 size={16} />Delete brand pair</Button></div>
+      </Modal>}
       {deleteSource && <Modal title="Delete imported source?" onClose={() => !busy && setDeleteSource(null)}>
         <div className="modal-body"><p><strong>{deleteSource.name}</strong></p><p>Delete this import and its {num(deleteSource.rows)} product occurrences from the reporting library? Existing prepared emails and batch history remain available.</p></div>
         <div className="modal-footer"><Button variant="secondary" disabled={busy} onClick={() => setDeleteSource(null)}>Cancel</Button>
@@ -3182,6 +3237,7 @@ export default function App() {
                   forms: brandEdit.forms.map(normalize).filter(Boolean),
                   aliases: brandEdit.aliases?.filter(Boolean),
                 };
+                if (workspace.deletedBrandPairs?.includes(brandPairKey(p))) { notify("This brand pair was deleted by an admin.", true); return; }
                 if (workspace.profiles.some(o => o.id !== p.id && brandPairKey(o) === brandPairKey(p))) { notify("This brand and generic pair already exists. Edit its existing entry.", true); return; }
                 const exists = workspace.profiles.some((o) => o.id === p.id);
                 if (

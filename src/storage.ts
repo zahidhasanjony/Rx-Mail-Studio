@@ -1,7 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Dataset, Workspace, RxFact, BrandProfile } from "./types";
 import { defaultSettings, emptyWorkspace, settingsForNewUser } from "./types";
-import { reconcileBrandPairs } from "./catalogue";
+import { reconcileBrandPairs, brandPairKey } from "./catalogue";
+import { reportGenericNames } from "./markets";
 import { reportingMonths } from "./reporting";
 import { templateError } from "./email-template";
 import type { EmailTemplate, Hierarchy } from "./types";
@@ -32,7 +33,7 @@ export async function localLoad(): Promise<Workspace> {
       const r = d.transaction("workspace").objectStore("workspace").get("main");
       r.onsuccess = () => {
         const saved = r.result as Workspace | undefined;
-        resolve(saved ? { ...saved, profiles: reconcileBrandPairs(saved.profiles, saved.datasets), settings: { ...defaultSettings, ...saved.settings } } : emptyWorkspace());
+        resolve(saved ? { ...saved, profiles: reconcileBrandPairs(saved.profiles, saved.datasets, saved.deletedBrandPairs), settings: { ...defaultSettings, ...saved.settings } } : emptyWorkspace());
       };
       r.onerror = () => reject(r.error);
     });
@@ -96,11 +97,35 @@ export async function cloudProfiles(): Promise<BrandProfile[]> {
     if ((result.data?.length || 0) < 500) return profiles;
   }
 }
+export async function cloudDeletedBrandPairs(): Promise<string[]> {
+  if (!supabase) throw new Error("Cloud connection missing");
+  const keys: string[] = [];
+  for (let offset = 0; ; offset += 500) {
+    const result = await supabase.from("rxm_deleted_brand_pairs").select("generic,brand").order("generic").order("brand").range(offset, offset + 499);
+    fail(result.error);
+    keys.push(...(result.data || []).map(row => brandPairKey(row)));
+    if ((result.data?.length || 0) < 500) return keys;
+  }
+}
+export async function cloudCatalogue() {
+  const profiles = await cloudProfiles();
+  // Read deletion markers after profiles so a concurrent deletion cannot make
+  // reconciliation restore a built-in from an older marker snapshot.
+  const deletedBrandPairs = await cloudDeletedBrandPairs();
+  return { profiles, deletedBrandPairs, persistedProfileIds: profiles.map(profile => profile.id) };
+}
+export async function cloudDeleteBrandPair(id: string) {
+  const client = await requireAdmin();
+  const result = await client.from("rxm_profiles").delete().eq("id", id).select("id");
+  fail(result.error);
+  if (!result.data?.length) throw new Error("This pair is no longer available. Refresh the workspace.");
+  return cloudCatalogue();
+}
 export async function cloudUpdateCatalogue() {
   const client = await requireAdmin();
   const result = await client.rpc("rxm_refresh_catalogue");
   fail(result.error);
-  return { added: Number(result.data || 0), profiles: await cloudProfiles() };
+  return { added: Number(result.data || 0), ...await cloudCatalogue() };
 }
 export async function cloudLoad(): Promise<Workspace> {
   if (!supabase) throw new Error("Cloud connection is not configured");
@@ -117,6 +142,7 @@ export async function cloudLoad(): Promise<Workspace> {
     throw new Error(
       "Your account is not active in this SBM workspace. Ask your admin to check your access.",
     );
+  const catalogue = cloudCatalogue();
   const values = await Promise.all([
     supabase
       .from("rxm_datasets")
@@ -127,7 +153,7 @@ export async function cloudLoad(): Promise<Workspace> {
       .from("rxm_hierarchies")
       .select("*")
       .order("created_at", { ascending: false }),
-    cloudProfiles().then(data => ({ data, error: null })),
+    catalogue.then(value => ({ data: value.profiles, error: null })),
     supabase
       .from("rxm_batches")
       .select("*")
@@ -144,18 +170,21 @@ export async function cloudLoad(): Promise<Workspace> {
       .eq("email", (user.user.email || "").toLowerCase())
       .maybeSingle(),
     supabase.from("rxm_workspace_defaults").select("payload").eq("id", "email").maybeSingle(),
+    catalogue.then(value => ({ data: value.deletedBrandPairs, error: null })),
   ]);
   values.forEach((v) => fail(v.error));
   const base = emptyWorkspace();
   const storedProfiles = values[2].data as BrandProfile[];
+  const deletedBrandPairs = values[7].data as string[];
   const datasets: Dataset[] = (values[0].data || []).map(d => ({ ...d.payload, id: d.id, active: d.active, facts: [] }));
   return {
     ...base,
+    deletedBrandPairs,
     sharedEmailTemplate: values[6].data?.payload,
     datasets,
     persistedProfileIds: storedProfiles.map(p => p.id),
     hierarchies: (values[1].data || []).map((h) => h.payload),
-    profiles: reconcileBrandPairs(storedProfiles, datasets),
+    profiles: reconcileBrandPairs(storedProfiles, datasets, deletedBrandPairs),
     batches: (values[3].data || []).map((b) => b.payload),
     settings: { ...settingsForNewUser(user.user.email || ""), ...(
       (values[4].data as { payload?: Workspace["settings"] } | null)?.payload ||
@@ -170,7 +199,7 @@ export async function cloudHydrate(
   endMonth = month,
 ) {
   if (!supabase) throw new Error("Cloud connection missing");
-  const generics = [profile.generic, ...(profile.aliases || [])].map(normalize);
+  const generics = reportGenericNames(profile);
   const ids = datasets
     .filter(
       (d) =>
@@ -309,8 +338,9 @@ export async function cloudSave(
     fail(result.error);
   }
   for (const p of changedProfiles.filter(p => storedIds.has(p.id))) {
-    const result = await supabase.from("rxm_profiles").update({ payload: p }).eq("id", p.id);
+    const result = await supabase.from("rxm_profiles").update({ payload: p }).eq("id", p.id).select("id");
     fail(result.error);
+    if (!result.data?.length) throw new Error("This brand pair is no longer available. Refresh your workspace.");
   }
   if (JSON.stringify(next.settings) !== JSON.stringify(previous.settings)) {
     const r = await supabase
@@ -332,7 +362,7 @@ export async function cloudSave(
       fail(r.error);
     }
   if (importing || changedProfiles.length) {
-    const profiles = await cloudProfiles();
-    return { profiles: reconcileBrandPairs(profiles, next.datasets), persistedProfileIds: profiles.map(p => p.id) };
+    const catalogue = await cloudCatalogue();
+    return { ...catalogue, profiles: reconcileBrandPairs(catalogue.profiles, next.datasets, catalogue.deletedBrandPairs) };
   }
 }

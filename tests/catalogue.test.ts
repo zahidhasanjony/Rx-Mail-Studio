@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendBrandPairs, reconcileBrandPairs, sourceBrandPairs, searchBrandPairs } from "../src/catalogue";
+import { appendBrandPairs, reconcileBrandPairs, sourceBrandPairs, searchBrandPairs, brandPairKey } from "../src/catalogue";
 import { starterProfiles } from "../src/types";
 import type { BrandProfile } from "../src/types";
 
@@ -41,4 +41,11 @@ test("library search matches brand and generic across case and whitespace with c
   assert.equal(searchBrandPairs([fresh], "new   generic").length, 1);
   assert.equal(searchBrandPairs(starterProfiles, "unknown").length, 0);
   assert.deepEqual(searchBrandPairs(starterProfiles, ""), starterProfiles);
+});
+test("deleted normalized pairs stay absent from defaults, source discovery and stale device copies", () => {
+  const deleted = [brandPairKey(starterProfiles[0]), brandPairKey(fresh)];
+  const datasets = [{ catalog: [{ ...fresh, id: "reimported", brand: " new  brand ", generic: " example generic " }] }];
+  const result = reconcileBrandPairs([], datasets, deleted);
+  assert.ok(!result.some(p => deleted.includes(brandPairKey(p))));
+  assert.ok(!appendBrandPairs(result, [starterProfiles[0], fresh], deleted).some(p => deleted.includes(brandPairKey(p))));
 });
