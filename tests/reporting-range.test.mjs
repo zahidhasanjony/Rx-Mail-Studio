@@ -18,6 +18,21 @@ test("month ranges cross years and label each reporting Flash consistently", () 
   }
   assert.match(defaultEmailTemplate.subject, /\{Generic\} \(\{Brand\}\).*\{Region\}.*\{Period\}/);
 });
+test("automatic cumulative Flashes use only complete coverage in the last selected month", () => {
+  const dates = (month, count) => Array.from({ length: count }, (_, i) => `${month}-${String(i + 1).padStart(2, "0")}`);
+  const earlier = dates("2026-06", 30);
+  for (const [count, suffix] of [[10, " 1st Flash"], [20, " 2nd Flash"], [31, ""]]) {
+    const available = [...earlier, ...dates("2026-10", count)];
+    assert.equal(reportingPeriod("2026-06", "2026-10", "all", available), `June'26–October'26${suffix}`);
+    assert.equal(reportingPeriod("2026-10", "2026-10", "all", available), `October'26${suffix}`);
+  }
+  assert.equal(reportingPeriod("2026-06", "2026-10", "all", earlier), "June'26–October'26", "Do not fall back to an earlier month");
+  assert.equal(reportingPeriod("2026-06", "2026-10", "all", dates("2026-10", 20).slice(10)), "June'26–October'26", "11–20 alone is not cumulative 1–20 coverage");
+  assert.equal(reportingPeriod("2026-06", "2026-10", "all", dates("2026-10", 10).slice(1)), "June'26–October'26", "Do not claim a completed Flash with missing days");
+  assert.equal(reportingPeriod("2026-06", "2026-10", "first", dates("2026-10", 31)), "June'26–October'26 1st Flash", "Explicit cycle selections retain their meaning");
+  assert.equal(reportingPeriod("2026-12", "2027-01", "all", dates("2027-01", 20)), "December'26–January'27 2nd Flash");
+  assert.equal(reportingPeriod("2026-02", "2026-02", "all", dates("2026-02", 28)), "February'26");
+});
 const profile = { generic: "Ketotifen", brand: "Tofen", forms: ["TAB"] };
 const fact = (month, brand, count, day = "05") => ({ date: `${month}-${day}`, generic: "Ketotifen", brand, form: "TAB", count,
   doctorCode: "D1", doctorName: "Dr. Example", specialty: "Medicine", acdRegion: "A1", acdMpe: "A11", acdAse: "A10", ccdRegion: "C1", ccdMpe: "C11", ccdAse: "C10" });

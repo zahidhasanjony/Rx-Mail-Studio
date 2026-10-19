@@ -59,7 +59,7 @@ export function outlookExcel(batch: Batch, template: Uint8Array): Uint8Array {
     .filter(match => Number(match[1]) < FIRST_MAIL_ROW).map(match => match[0]);
   if (headerRows.length !== FIRST_MAIL_ROW - 1) throw new Error("The Outlook Excel template headers are invalid.");
   const columnStyle = (col: string) => main.match(new RegExp(`<x:c r="${col}${FIRST_MAIL_ROW}"[^>]* s="([^"]+)"`))?.[1];
-  const period = reportingPeriod(batch.month, batch.endMonth || batch.month, batch.period);
+  const period = batch.periodLabel || reportingPeriod(batch.month, batch.endMonth || batch.month, batch.period);
   headerRows[2] = headerRows[2].replace(/<x:c r="A3"[^>]*>[\s\S]*?<\/x:c>/, () => textCell("A3", `${batch.brand} / ${batch.generic} - ${period} - ${batch.mails.length} emails`, main.match(/<x:c r="A3"[^>]* s="([^"]+)"/)?.[1]));
   const mailRows: string[] = [], payload: string[] = [];
   let bodyRow = 2;

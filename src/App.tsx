@@ -534,7 +534,6 @@ export default function App() {
   const [deleteSource, setDeleteSource] = useState<Dataset | null>(null);
   const [publishDefault, setPublishDefault] = useState(false);
   const selectedMonths = reportingMonths(month, endMonth);
-  const periodLabel = reportingPeriod(month, endMonth, period);
   const composeSettings = { ...workspace.settings, emailTemplate };
   const sourceInput = useRef<HTMLInputElement>(null),
     hierarchyInput = useRef<HTMLInputElement>(null),
@@ -697,6 +696,7 @@ export default function App() {
   const activeSources = eligibleDatasets(marketSources, month, endMonth),
     days = coverage(marketSources, month, endMonth),
     lastDay = selectedMonths.reduce((sum, m) => sum + new Date(Number(m.slice(0, 4)), Number(m.slice(5)), 0).getDate(), 0);
+  const periodLabel = reportingPeriod(month, endMonth, period, days);
   const selectedDays = days.filter(date => period === "all" ||
     (period === "first" && Number(date.slice(8)) <= 10) ||
     (period === "second" && Number(date.slice(8)) >= 11 && Number(date.slice(8)) <= 20) ||
@@ -1162,6 +1162,7 @@ export default function App() {
         month,
         endMonth,
         period,
+        periodLabel,
         brand: profile.brand,
         generic: marketLabel(marketProfile),
         sourceIds: activeSources.map((d) => d.id),
@@ -2278,7 +2279,7 @@ export default function App() {
                           {b.brand} · {b.generic}
                         </strong>
                         <small>
-                          {reportingPeriod(b.month, b.endMonth || b.month, b.period)} · {b.mails.length} regional
+                          {b.periodLabel || reportingPeriod(b.month, b.endMonth || b.month, b.period)} · {b.mails.length} regional
                           emails ·{" "}
                           {new Date(b.createdAt).toLocaleString("en-GB")}
                         </small>
@@ -3366,7 +3367,7 @@ export default function App() {
               </span>
               <div>
                 <h3>
-                  {batchModal.brand} · {reportingPeriod(batchModal.month, batchModal.endMonth || batchModal.month, batchModal.period)}
+                  {batchModal.brand} · {batchModal.periodLabel || reportingPeriod(batchModal.month, batchModal.endMonth || batchModal.month, batchModal.period)}
                 </h3>
 
               </div>

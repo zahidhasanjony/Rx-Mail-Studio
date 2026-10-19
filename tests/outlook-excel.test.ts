@@ -68,6 +68,12 @@ test("51+ emails and long Unicode doctor tables reconstruct completely without c
   for (const c of payloadDoc.getElementsByTagNameNS("*", "t")) assert.ok(c.textContent!.length <= 32767);
 });
 
+test("Excel header keeps the generated cumulative Flash label when a saved batch is downloaded later", () => {
+  const saved = { ...batch, month: "2026-06", endMonth: "2026-10", period: "all", periodLabel: "June'26–October'26 2nd Flash" };
+  const files = unzipSync(outlookExcel(saved, template));
+  assert.match(cells(xml(files, "xl/worksheets/sheet1.xml")).get("A3")!, /June'26–October'26 2nd Flash/);
+});
+
 test("macro workbook has a bound Forms button, matching codenames and review-only VBA with retries", () => {
   const files = unzipSync(template);
   assert.match(strFromU8(files["[Content_Types].xml"]), /application\/vnd.ms-excel.sheet.macroEnabled.main\+xml/);

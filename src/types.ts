@@ -162,6 +162,7 @@ export interface Batch {
   month: string;
   endMonth?: string;
   period?: string;
+  periodLabel?: string;
   brand: string;
   generic: string;
   sourceIds: string[];
