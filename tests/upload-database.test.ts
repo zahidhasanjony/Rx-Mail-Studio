@@ -10,7 +10,8 @@ test('Postgres verifies resumable chunks, owner isolation, retries and atomic ac
   try {
     await db.exec(`create role anon;create role authenticated;create schema auth;create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz,is_anonymous boolean default false);create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;create function auth.jwt() returns jsonb language sql stable as $$select jsonb_build_object('email',current_setting('request.jwt.claim.email',true))$$;grant usage on schema auth to authenticated;grant execute on function auth.uid(),auth.jwt() to authenticated;`);
     const migration = (await readdir(new URL('../supabase/migrations/',import.meta.url))).find(name => name.endsWith('_resumable_source_upload.sql'))!;
-    for (const file of ['schema.sql','admin-reporting.sql','brand-catalogue.sql','migrations/20261017045737_brand_pair_deletion.sql','migrations/'+migration]) await db.exec(await readFile(new URL('../supabase/'+file,import.meta.url),'utf8'));
+    const dashboardMigration = (await readdir(new URL('../supabase/migrations/',import.meta.url))).find(name => name.endsWith('_dashboard_summaries.sql'))!;
+    for (const file of ['schema.sql','admin-reporting.sql','brand-catalogue.sql','migrations/20261017045737_brand_pair_deletion.sql','migrations/'+migration,'migrations/'+dashboardMigration]) await db.exec(await readFile(new URL('../supabase/'+file,import.meta.url),'utf8'));
     await db.exec(`insert into auth.users(id,email,email_confirmed_at) values('${owner}','owner@example.com',now()),('${editor}','editor@example.com',now()),('${member}','member@example.com',now());insert into public.rxm_members(email,role) values('editor@example.com','editor'),('member@example.com','member');`);
     const identity = async(id:string,email:string) => { await db.exec(`reset role;select set_config('request.jwt.claim.sub','${id}',false);select set_config('request.jwt.claim.email','${email}',false);set role authenticated;`); };
     const call = async(name:string,...values:unknown[]) => (await db.query(`select public.${name}(${values.map((_,i)=>'$'+(i+1)).join(',')}) as result`,values.map(v=>name==='rxm_finish_import'&&Array.isArray(v)?'{'+v.join(',')+'}':typeof v==='object'?JSON.stringify(v):v))).rows[0] as {result:any};
@@ -44,7 +45,7 @@ test('Postgres verifies resumable chunks, owner isolation, retries and atomic ac
     assert.equal((await call('rxm_begin_upload',source,manifest)).result.complete,true,'completion can be recovered after losing its response');
     assert.equal((await db.query<{rx:number}>(`select sum(upload_rx)::int as rx,count(*)::int as chunks from public.rxm_fact_chunks where dataset_id='${id}'`)).rows[0].rx,5);
     assert.equal((await db.query<{active:boolean}>(`select active from public.rxm_datasets where id='${old}'`)).rows[0].active,false);
-    assert.equal((await db.query(`update public.rxm_fact_chunks set upload_rx=100 where dataset_id='${id}' returning id`)).rows.length,0,'checked chunks are not editable through the Data API');
+    await assert.rejects(db.query(`update public.rxm_fact_chunks set upload_rx=100 where dataset_id='${id}' returning id`),/permission denied/,'checked chunks are not editable through the Data API');
     await db.exec('reset role;set role anon');
     await assert.rejects(call('rxm_begin_upload',source,manifest),/permission denied/);
   } finally { await db.close(); }

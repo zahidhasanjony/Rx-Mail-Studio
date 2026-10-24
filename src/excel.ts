@@ -210,6 +210,7 @@ const keys = {
   generic: ["GENERIC NAME"],
   brand: ["BRAND NAME"],
   company: ["COMPANY NAME"],
+  tg: ["TG_L(ALL)", "TG_L (ALL)", "THERAPEUTIC GROUP", "TG"],
   form: ["DOSAGE DESCRIPTION"],
   doctorCode: ["DR CODE", "DOCTOR CODE"],
   doctorName: ["DR NAME/INSTITUTE NAME", "DOCTOR NAME"],
@@ -239,6 +240,7 @@ export async function importRx(
     facts = new Map<string, RxFact>(),
     catalog = new Map<string, BrandProfile>(),
     availableGenerics = new Set<string>(),
+    therapeuticGroups: Record<string, string> = {},
     dates = new Set<string>(),
     regions = { ACD: new Set<string>(), CCD: new Set<string>() },
     aseParents = { ACD: new Map<string, Set<string>>(), CCD: new Map<string, Set<string>>() },
@@ -308,6 +310,9 @@ export async function importRx(
           sourceRow: line,
           sheet: sheet.name,
         };
+        const tgKey = [f.generic, f.brand, f.company].map(normalize).join('\u001f');
+        const tg = normalize(get('tg'));
+        if (tg) therapeuticGroups[tgKey] = tgKey in therapeuticGroups && therapeuticGroups[tgKey] !== tg ? '' : tg;
         dates.add(date);
         for (const [structure, region, mpe, ase] of [
           ["ACD", f.acdRegion, f.acdMpe, f.acdAse],
@@ -410,6 +415,7 @@ export async function importRx(
     hash,
     includedGenerics: generics,
     availableGenerics: [...availableGenerics].sort(),
+    therapeuticGroups,
     importedAt: new Date().toISOString(),
     active: true,
     rows,

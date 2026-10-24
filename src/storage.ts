@@ -8,6 +8,17 @@ import { templateError } from "./email-template";
 import type { EmailTemplate, Hierarchy } from "./types";
 import { normalize, overlaps } from "./engine";
 import { importFactBatches } from "./import-staging";
+import type { DashboardRow } from './dashboard-model';
+export async function cloudDashboard(from: string, to: string, signal: AbortSignal): Promise<DashboardRow[]> {
+  if (!supabase) throw new Error('Cloud connection missing');
+  const result = await supabase.rpc('rxm_dashboard', { from_month: from, to_month: to }).abortSignal(signal);
+  if (result.error) throw new Error(result.error.message);
+  return (result.data as [string, string, string, string, number][] || []).map(([tg, generic, brand, company, count]) => {
+    const rx = Number(count);
+    if (!Number.isSafeInteger(rx) || rx < 0) throw new Error('The dashboard returned an invalid Rx count.');
+    return { tg, generic, brand, company, rx };
+  });
+}
 export const cloudConfigured = Boolean(
   import.meta.env.VITE_SUPABASE_URL &&
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,

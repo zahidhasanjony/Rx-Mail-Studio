@@ -29,6 +29,7 @@ export interface Dataset {
   sourceHash?: string;
   includedGenerics?: string[];
   availableGenerics?: string[];
+  therapeuticGroups?: Record<string, string>;
   importedAt: string;
   active: boolean;
   rows: number;

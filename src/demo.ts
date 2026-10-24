@@ -54,6 +54,8 @@ export function demoWorkspace(): Workspace {
       sheets: ["Sample data"],
       facts,
       catalog: w.profiles,
+      therapeuticGroups: { ['KETOTIFEN\u001fTOFEN\u001fBEXIMCO']: 'ANTI-ALLERGY',
+        ...Object.fromEntries(['FENAT', 'TOTIFEN', 'KETIFEN', 'KETOMAR', 'ALARID'].map(b => [`KETOTIFEN\u001f${b}\u001fSAMPLE COMPETITOR`, 'ANTI-ALLERGY'])) },
     },
   ];
   w.hierarchies = [

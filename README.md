@@ -97,6 +97,14 @@ Admins can delete a pair from **Brand library** after confirming the named pair.
 
 Apply `supabase/migrations/20261017045737_brand_pair_deletion.sql` after `brand-catalogue.sql` before deploying the updated client. The migration was generated with the Supabase CLI and adds deletion markers, operation-specific policies and guarded catalogue insertion.
 
+## Rx dashboard
+
+Dashboard adds single-month and range reporting, overall Beximco Rx share/counts, TG shares and a TG-to-brand view. Brand rows show their generic-market denominator, including competitor counts whose TG is unknown. Counts are prescription product occurrences, and range shares are calculated from summed counts. Only active, completed sources are included. Missing months, selected-generic imports and unclassified TGs are shown explicitly.
+
+The source importer retains the MRW `TG_l(All)` classification in source metadata without changing the checked upload-payload format. Older imports can use the protected reference taxonomy populated from the supplied MRW files; conflicting or absent mappings stay Unclassified. Reference data is not part of this repository. Future source-specific mappings take precedence.
+
+Apply the `dashboard_summaries` migration after `resumable_source_upload`. Its trigger caches non-identifying brand/company occurrence totals per chunk. Backfill existing null `dashboard_summary` values using `rxm_private.summarize_rx(payload)` in bounded batches before publishing. The authenticated, security-invoker `rxm_dashboard` RPC reads these compact summaries through existing RLS. Data API clients cannot forge summary columns or edit the reference taxonomy. Activation, deletion, payload changes and replacement automatically affect the dashboard. The dashboard does not hydrate all prescription facts into the browser.
+
 ## Mobile source imports and recovery
 
 Cloud imports scan prescription rows once, discovering all generic markets while staging facts in small batches in a worker. All markets are selected by default; the review can narrow them without parsing the workbook again. After confirmation the worker prepares byte-capped parts and a manifest. Only metadata crosses into React reporting state. Equivalent Rx rows may be aggregated in separate batches; all counts are summed by the report engine. Device-only imports retain their existing selected-market workflow.

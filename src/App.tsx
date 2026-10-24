@@ -90,6 +90,7 @@ import type { UserAccount } from "./auth";
 import UsersPage from "./UsersPage";
 import AndroidMailQueue from "./AndroidMailQueue";
 import RegionReview from "./RegionReview";
+import DashboardPage from './DashboardPage';
 import EmailTemplateEditor from "./EmailTemplateEditor";
 import { emailTemplateFor, templateError } from "./email-template";
 import { download, outlookPackage, mailEml, emlFilename, emlPackage, emlPackageFilename, hierarchyCsv } from "./export";
@@ -109,9 +110,10 @@ import {
 } from "./bridge";
 
 type Page =
-  "generate" | "sources" | "hierarchy" | "brands" | "history" | "settings" | "users";
+  "dashboard" | "generate" | "sources" | "hierarchy" | "brands" | "history" | "settings" | "users";
 const nav = [
-  { id: "generate", label: "Generate emails", icon: LayoutDashboard },
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "generate", label: "Generate emails", icon: Mail },
   { id: "sources", label: "Source files", icon: UploadCloud },
   { id: "hierarchy", label: "Region hierarchy", icon: Network },
   { id: "brands", label: "Brand library", icon: FlaskConical },
@@ -655,7 +657,7 @@ export default function App() {
   } : undefined, [profile, dosageForm, additionalGenerics.join("|"), formsForSelection]);
   useEffect(() => setDosageForm("all"), [profileId]);
   useEffect(() => {
-    if (mode !== "cloud" || !profile) return;
+    if (mode !== "cloud" || !profile || page === 'dashboard') return;
     let alive = true;
     setLoading(true);
     cloudHydrate(workspaceRef.current.datasets, month, marketProfile!, endMonth)
@@ -676,6 +678,7 @@ export default function App() {
     };
   }, [
     mode,
+    page === 'dashboard',
     month,
     endMonth,
     profile?.generic,
@@ -1388,7 +1391,7 @@ export default function App() {
     setPage("generate");
   };
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${page === 'dashboard' ? 'dashboard-active' : ''}`}>
       <aside className={`sidebar ${mobileNav ? "mobile-open" : ""}`}>
         <a
           className="brand"
@@ -1510,11 +1513,12 @@ export default function App() {
               </button>
             </div>
           )}
-          <div className="page-heading">
+          <div className="page-heading" hidden={page === 'dashboard'}>
             <div>
               <h1>
                 {
                   {
+                    dashboard: 'Dashboard',
                     generate: "Generate emails",
                     sources: "Source files",
                     hierarchy: "Region hierarchy",
@@ -1567,6 +1571,7 @@ export default function App() {
               </Button>
             ) : null}
           </div>
+          {page === 'dashboard' && <DashboardPage key={mode + ':' + (account?.id || 'device')} datasets={workspace.datasets} mode={mode}/>}
           {page === "generate" && (
             <>
               <section className="filter-card">
@@ -2619,7 +2624,7 @@ export default function App() {
         <nav className="mobile-bottom">
           {nav
             .filter((n) =>
-              ["generate", "sources", "hierarchy", "settings"].includes(n.id),
+              ["dashboard", "generate", "sources", "hierarchy", "settings"].includes(n.id),
             )
             .map((n) => (
               <button

@@ -21,6 +21,16 @@
   color: #16324f;
   background: var(--rx-canvas);
 }
+.dashboard-active .main-area { background: #090c12; }
+.dashboard-active .main-area > main { padding: 0; }
+.dashboard-active .page-heading[hidden] { display: none; }
+.dashboard-active .topbar { background: #122349; border-color: #293a59; color: #edf2fa; }
+.dashboard-active .topbar .breadcrumbs, .dashboard-active .topbar .breadcrumbs strong, .dashboard-active .topbar .top-account-action, .dashboard-active .topbar .account-identity { color: #e0eaf9; }
+.dashboard-active .topbar .account-identity small { color: #b3c7e4; }
+.dashboard-active .sidebar { background: #101a2d; }
+.dashboard-active .sidebar nav button.active { background: #203c60; color: #b5d8ff; }
+.dashboard-active .mobile-bottom { background: #101724; border-top: 1px solid #2b374b; }
+.dashboard-active .mobile-bottom button.active, .dashboard-active .mobile-bottom button.active:hover, .dashboard-active .mobile-bottom button.active:focus-visible, .dashboard-active .mobile-bottom button.active:active { color: #c2e0ff; background: #244467; }
 .sidebar { background: var(--rx-navy); color: white; border: 0; padding-top: 28px; }
 .brand { color: white; margin-bottom: 36px; }
 .brand-sub, .workspace-label, .user small { color: var(--rx-nav-text); }
