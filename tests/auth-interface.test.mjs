@@ -113,7 +113,7 @@ test("compiled login restores the cloud indicator, preserves admin page access a
         assert.equal(requests.length, 0, "The login page does not download cloud data before a mode is chosen");
         assert.equal(calls.length, 0, "Saved sessions do not delay or bypass the login page");
         if (role === "stale") {
-          await waitFor(() => button("Open cloud workspace")); button("Open cloud workspace").click();
+          await waitFor(() => w.document.querySelector('[aria-label="Password"]')?.required === false); w.document.querySelector(".login-card form").dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
           await waitFor(() => w.document.querySelector('[aria-label="Username"]'));
           await waitFor(() => calls.some((c) => c.action === "me"));
           await waitFor(() => w.localStorage.getItem("sb-rx-project-auth-token") === null);
@@ -141,7 +141,7 @@ test("compiled login restores the cloud indicator, preserves admin page access a
           assert.ok(!Object.values(w.localStorage).some(value => value.includes('abcd')), "Never store the password in web storage");
           assert.deepEqual(calls.find((c) => c.action === "login"), { action: "login", username: account.username, password: "abcd" });
         } else {
-          await waitFor(() => button("Open cloud workspace")); button("Open cloud workspace").click();
+          await waitFor(() => w.document.querySelector('[aria-label="Password"]')?.required === false); w.document.querySelector(".login-card form").dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
           await waitFor(() => w.document.querySelector('.mode-pill[aria-label="Cloud connected"]'));
           assert.ok(!calls.some(c => c.action === "login"), "A saved verified session opens cloud mode without another password");
         }

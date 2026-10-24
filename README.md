@@ -135,7 +135,7 @@ The `dashboard_range_timeout` migration keeps the preparation RPC result and acc
 
 ## Startup and storage choice
 
-The app starts on a dedicated login page. Opening the page does not read the device workspace or download cloud metadata. Sign in with the existing admin-created username and password, or choose **Use Device Memory** to open the IndexedDB workspace without cloud authentication. A saved cloud session offers **Open cloud workspace**, which verifies the account before showing shared data. Signing out returns to the login page. Cloud and device workspaces remain separate.
+The app starts on a dedicated login page. Opening the page does not read the device workspace or download cloud metadata. Sign in with the existing admin-created username and password, or choose **Use Device Memory** to open the IndexedDB workspace without cloud authentication. With a saved cloud session, **Sign in** verifies the account and opens shared data without requiring another password when the password field is empty. Signing out returns to the login page. Cloud and device workspaces remain separate.
 
 **Save username and password** remembers the username and requests password saving through the browser credential manager. The browser may instead offer its native save prompt; availability depends on the browser. Raw passwords are never written to localStorage or IndexedDB. Unchecking the option clears the saved username. Saved cloud sessions remain managed by Supabase and are revoked locally on sign-out.
 
@@ -148,3 +148,5 @@ Sign-in no longer reads `rxm_batches`. Batch history reads pages of 20 small sum
 ## Page change requests
 
 **Select changes** is available on the login page and every workspace page. In selection mode, taps select content instead of running app actions; sidebar and bottom navigation remain usable. Use **Select larger section** to target a container, choose Remove or Change, enter instructions, and add the item to the list. Turn selection off to use filters or drill into dashboard brands. **Review → Copy list for chat** exports the collected requests for implementation. Requests are stored only in this browser, can be individually removed, and do not alter the app, prescription data or generated emails. Input values and embedded email documents are excluded from captured section labels.
+
+The login page uses a compact sign-in form and device-memory option. Dashboard reporting controls appear only on the overview; brand and competitor views use that selected period. The TG share list remains available without its heading/subtitle. Classification reminder and unclassified-count banners are omitted; Unclassified brands and their assignment controls remain available.

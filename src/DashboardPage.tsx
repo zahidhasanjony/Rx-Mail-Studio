@@ -83,12 +83,9 @@ export default function DashboardPage({ datasets, mode, canEdit }: { datasets: D
     setSavedNotice(`${brand} assigned to ${tg}.${mode === 'demo' ? ' This is a sample-only change.' : ''}`);
   }
   const notices = [];
-  if (mode !== 'demo' && eligibleDatasets(datasets, from, to).some(source => source.classificationVersion !== 2)) notices.push('Re-upload older source files to refresh preparation-specific TG classification.');
   if (savedNotice) notices.push(savedNotice);
   if (metadata.missing.length) notices.push(`No active source for ${metadata.missing.map(m => reportingPeriod(m)).join(', ')}. Totals include the available months only.`);
   if (metadata.limited) notices.push('Some sources contain selected generics only. These shares cover the imported markets.');
-  const unclassified = rows.filter(r => r.tg === 'Unclassified').reduce((n, r) => n + r.rx, 0);
-  if (unclassified) notices.push(`${unclassified.toLocaleString()} Rx occurrences are unclassified. Their source TG is missing or ambiguous; they remain in the overall total.`);
   return <RxDashboardView embedded rows={rows} months={months} from={from} to={to} range={scope.range}
     sample={mode === 'demo'} periodLabel={from ? reportingPeriod(from, to, 'all', metadata.dates) : 'No active sources'}
     loading={mode === 'cloud' ? !!from && !current : !mappingReady} error={error} notices={notices}

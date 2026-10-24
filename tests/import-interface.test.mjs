@@ -83,8 +83,8 @@ test("compiled cloud upload scans once, stays usable, pauses and resumes without
     const waitFor = async check => { for (let i = 0; i < 250; i++) { if (check()) return; await new Promise(r => setTimeout(r, 15)); } assert.fail(w.document.body.textContent.slice(-1500) + errors.join(';')); };
     const button = text => [...w.document.querySelectorAll('button')].find(b => b.textContent.trim() === text);
     w.eval(code.replaceAll('import.meta.url', '"https://rxmail.vercel.app/"'));
-    await waitFor(() => button('Open cloud workspace'));
-    button('Open cloud workspace').click();
+    await waitFor(() => w.document.querySelector('[aria-label="Password"]')?.required === false);
+    w.document.querySelector('.login-card form').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
     await waitFor(() => w.document.querySelector('[aria-label="Cloud connected"]'));
     const file = w.document.querySelector('input[type="file"]');
     Object.defineProperty(file, 'files', { configurable: true, value: [new w.File(['test'], 'July.xlsx'), new w.File(['test2'], 'August.xlsx')] });
