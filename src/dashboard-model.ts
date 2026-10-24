@@ -3,7 +3,7 @@ import { normalize, coverage, eligibleDatasets } from './engine';
 import { reportingMonths } from './reporting';
 
 import type { DashboardRow } from './components/generated/DashboardData';
-export { dashboardTotals, dashboardGroups, dashboardBrands } from './components/generated/DashboardData';
+export { dashboardTotals, dashboardGroups, dashboardBrands, dashboardCompetitors } from './components/generated/DashboardData';
 export type { DashboardRow } from './components/generated/DashboardData';
 export interface DashboardData { rows: DashboardRow[]; dates: string[]; missingMonths: string[]; limited: boolean }
 export const therapeuticGroupKey = (generic: string, brand: string, company: string) => [generic, brand, company].map(normalize).join('\u001f');

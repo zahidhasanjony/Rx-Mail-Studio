@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PGlite } from '@electric-sql/pglite';
 import { readFile, readdir } from 'node:fs/promises';
-import { dashboardData, dashboardGroups, dashboardBrands, dashboardTotals, therapeuticGroupKey, mappedDashboardRows } from '../src/dashboard-model';
+import { dashboardData, dashboardGroups, dashboardBrands, dashboardTotals, therapeuticGroupKey, mappedDashboardRows, dashboardCompetitors } from '../src/dashboard-model';
 import type { Dataset } from '../src/types';
 
 test('dashboard shares use summed occurrence counts, preserve all competitors and use each brand generic denominator', () => {
@@ -86,4 +86,27 @@ test('Postgres dashboard caches verified payload counts, protects summaries and 
     await db.exec(`reset role;select set_config('request.jwt.claim.sub','',false);select set_config('request.jwt.claim.email','',false);set role authenticated`);
     await assert.rejects(call(),/access required/);
   } finally { await db.close(); }
+});
+
+
+test('competitor ranking includes the whole generic market, merges normalized brand/company pairs and retains distinct companies', () => {
+  const rows = [
+    { tg: 'ANTI-ALLERGY', generic: 'Bilastine', brand: 'BILLI', company: 'BEXIMCO', rx: 10 },
+    { tg: 'Unclassified', generic: ' bilastine ', brand: ' billi ', company: ' beximco ', rx: 5 },
+    { tg: 'OTHER TG', generic: 'BILASTINE', brand: 'BIL-B', company: 'Company B', rx: 30 },
+    { tg: 'Unclassified', generic: 'Bilastine', brand: 'BIL-B', company: 'Company C', rx: 5 },
+    { tg: 'ANTI-ALLERGY', generic: 'Bilastine + Other', brand: 'COMBINATION', company: 'Company B', rx: 500 },
+    { tg: 'ANTI-ALLERGY', generic: 'Ketotifen', brand: 'BILLI', company: 'BEXIMCO', rx: 50 },
+  ];
+  const original = structuredClone(rows);
+  const market = dashboardCompetitors(rows, ' Bilastine ');
+  assert.equal(market.market, 50);
+  assert.deepEqual(market.brands.map(b => [b.name, b.company, b.rx, b.share]), [
+    ['BIL-B', 'Company B', 30, 60], ['BILLI', 'BEXIMCO', 15, 30], ['BIL-B', 'Company C', 5, 10],
+  ]);
+  assert.equal(market.brands.reduce((sum, b) => sum + b.share!, 0), 100);
+  assert.equal(market.brands.filter(b => b.beximco).length, 1);
+  assert.deepEqual(rows, original);
+  assert.deepEqual(dashboardCompetitors(rows, 'Missing'), { market: 0, brands: [] });
+  assert.equal(dashboardCompetitors([{ ...rows[0], rx: 0 }], 'Bilastine').brands[0].share, null);
 });
