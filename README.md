@@ -132,3 +132,11 @@ Apply the `resumable_source_upload` migration after the earlier migrations befor
 `/recover.html` opens independently of the React app. Its refresh button unregisters this app's service worker and removes only `rx-shell-` file caches; it preserves localStorage, IndexedDB workspace data and Supabase data. Startup HTML and the React error boundary provide a link to this page when the app cannot open.
 
 The `dashboard_range_timeout` migration keeps the preparation RPC result and access rules unchanged. It builds each generic key once, reuses trigger-normalized summary fields, expands each source TG map once, and limits metadata to the requested months. The RPC uses 16 MB of query-local work memory; it does not raise the API timeout or alter raw facts.
+
+## Startup and storage choice
+
+The app starts on a dedicated login page. Opening the page does not read the device workspace or download cloud metadata. Sign in with the existing admin-created username and password, or choose **Use Device Memory** to open the IndexedDB workspace without cloud authentication. A saved cloud session offers **Open cloud workspace**, which verifies the account before showing shared data. Signing out returns to the login page. Cloud and device workspaces remain separate.
+
+**Save username and password** remembers the username and requests password saving through the browser credential manager. The browser may instead offer its native save prompt; availability depends on the browser. Raw passwords are never written to localStorage or IndexedDB. Unchecking the option clears the saved username. Saved cloud sessions remain managed by Supabase and are revoked locally on sign-out.
+
+Startup cloud requests have network timeouts and visible retry errors. Device access remains available during a slow cloud connection; late cloud results cannot overwrite that choice. Email facts load only on Generate emails, and switching away cancels the request. Returning to the same selection reuses already loaded facts. Paging through fact chunks appends into arrays without repeatedly copying previously loaded rows. Report calculations and source selection are memoized. Offline navigation falls back to the cached app after three seconds if the network stalls.

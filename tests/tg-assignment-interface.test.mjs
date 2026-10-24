@@ -1,3 +1,4 @@
+import { enterDevice } from "./enter-workspace.mjs";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -16,7 +17,7 @@ test('an unclassified brand can select a TG, retry a failed save, and retain its
   const html = await readFile(new URL('../dist/index.html', import.meta.url), 'utf8');
   const asset = html.match(/src="(\/assets\/index-[^"]+\.js)"/)[1];
   const code = await readFile(new URL('../dist' + asset, import.meta.url), 'utf8');
-  const open = () => {
+  const open = async () => {
     const dom = new JSDOM('<div id="root"></div>', { url: 'https://rx-mail-studio.test/?view=dashboard', runScripts: 'outside-only', pretendToBeVisual: true });
     const w = dom.window, errors = [];
     w.addEventListener('error', e => errors.push(e.message));
@@ -24,9 +25,10 @@ test('an unclassified brand can select a TG, retry a failed save, and retain its
     Object.assign(w, { structuredClone, TextEncoder, TextDecoder, Blob });
     const wait = async check => { for (let i = 0; i < 200; i++) { if (check()) return; await new Promise(r => setTimeout(r, 15)); } assert.fail(w.document.body.textContent.slice(-1700) + errors.join(';')); };
     w.eval(code.replaceAll('import.meta.url', '"https://rx-mail-studio.test/"'));
+    await enterDevice(w);
     return { w, wait, errors, dom };
   };
-  let ui = open();
+  let ui = await open();
   const originalTransaction = IDBDatabase.prototype.transaction;
   try {
     await ui.wait(() => ui.w.document.querySelector('[aria-label="View Unclassified brands"]'));
@@ -54,7 +56,7 @@ test('an unclassified brand can select a TG, retry a failed save, and retain its
     await ui.wait(() => ui.w.document.querySelector('.rx-period-bottom').textContent.includes("June'26"));
     assert.ok(!ui.w.document.querySelector('[aria-label="View Unclassified brands"]'), 'The mapping applies to earlier months too');
     assert.deepEqual(ui.errors, []); ui.w.close();
-    ui = open();
+    ui = await open();
     await ui.wait(() => ui.w.document.querySelector('[aria-label="View Anti-Allergy brands"]'));
     assert.ok(!ui.w.document.querySelector('[aria-label="View Unclassified brands"]'));
     ui.w.document.querySelector('[aria-label="View Anti-Allergy brands"]').click();

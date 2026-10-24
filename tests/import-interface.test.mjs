@@ -83,6 +83,8 @@ test("compiled cloud upload scans once, stays usable, pauses and resumes without
     const waitFor = async check => { for (let i = 0; i < 250; i++) { if (check()) return; await new Promise(r => setTimeout(r, 15)); } assert.fail(w.document.body.textContent.slice(-1500) + errors.join(';')); };
     const button = text => [...w.document.querySelectorAll('button')].find(b => b.textContent.trim() === text);
     w.eval(code.replaceAll('import.meta.url', '"https://rxmail.vercel.app/"'));
+    await waitFor(() => button('Open cloud workspace'));
+    button('Open cloud workspace').click();
     await waitFor(() => w.document.querySelector('[aria-label="Cloud connected"]'));
     const file = w.document.querySelector('input[type="file"]');
     Object.defineProperty(file, 'files', { configurable: true, value: [new w.File(['test'], 'July.xlsx'), new w.File(['test2'], 'August.xlsx')] });
@@ -103,7 +105,7 @@ test("compiled cloud upload scans once, stays usable, pauses and resumes without
     assert.ok(w.document.body.textContent.includes('Upload paused'));
     assert.deepEqual((await loadUploadJobs(account.id)).map(job => job.source.name), ['July.xlsx', 'August.xlsx'], 'reopening can recover the entire ordered batch');
     button('Resume upload').click();
-    await waitFor(() => requests.filter(r => r.path.endsWith('/rxm_finish_import')).length === 2 && w.document.body.textContent.includes('Import complete'));
+    await waitFor(() => requests.filter(r => r.path.endsWith('/rxm_finish_import')).length === 2 && w.document.querySelector('.toast')?.textContent.includes('Import complete. Dashboard and mail analysis are updated.'));
     assert.deepEqual(actions, ['inspect', 'source-staged', 'inspect', 'source-staged', 'prepare-upload', 'prepare-upload']);
     assert.equal(requests.filter(r => r.path.endsWith('/rxm_upload_batch')).length, 2, 'resume skips acknowledged parts and continues the next file');
     assert.equal(chunks.flatMap(c => c.payload).reduce((n, f) => n + f.count, 0), 12);

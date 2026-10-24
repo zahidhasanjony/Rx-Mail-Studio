@@ -1,3 +1,4 @@
+import { enterDevice } from "./enter-workspace.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -28,7 +29,7 @@ test("personal signature defaults save through the production UI and survive reo
   const html = await readFile(new URL("../dist/index.html", import.meta.url), "utf8");
   const asset = html.match(/src="(\/assets\/index-[^"]+\.js)"/)?.[1];
   const code = await readFile(new URL("../dist" + asset, import.meta.url), "utf8");
-  const open = () => {
+  const open = async () => {
     const dom = new JSDOM('<!doctype html><div id="root"></div>', {
       url: "https://rx-mail-studio.test/", runScripts: "outside-only", pretendToBeVisual: true,
     });
@@ -40,6 +41,7 @@ test("personal signature defaults save through the production UI and survive reo
     Object.defineProperty(w, "IDBKeyRange", { value: IDBKeyRange });
     Object.assign(w, { structuredClone, TextEncoder, TextDecoder, Blob });
     w.eval(code.replaceAll("import.meta.url", '"https://rx-mail-studio.test/"'));
+    await enterDevice(w);
     const button = text => [...w.document.querySelectorAll("button")].find(b => b.textContent.trim() === text || b.querySelector("span")?.textContent === text);
     const input = label => [...w.document.querySelectorAll("label.field")].find(l => l.querySelector("span")?.textContent === label)?.querySelector("input,textarea");
     const waitFor = async check => {
@@ -56,7 +58,7 @@ test("personal signature defaults save through the production UI and survive reo
     };
     return { w, button, input, waitFor, set, errors };
   };
-  let ui = open();
+  let ui = await open();
   try {
     await ui.waitFor(() => ui.w.document.querySelectorAll(".queue-table tbody tr").length === 6);
     ui.button("Settings").click();
@@ -75,7 +77,7 @@ test("personal signature defaults save through the production UI and survive reo
     await ui.waitFor(() => ui.w.document.body.textContent.includes("Your defaults are saved"));
     assert.deepEqual(ui.errors, []);
     ui.w.close();
-    ui = open();
+    ui = await open();
     await ui.waitFor(() => ui.w.document.querySelectorAll(".queue-table tbody tr").length === 6);
     ui.button("Settings").click();
     await ui.waitFor(() => ui.input("Mobile numbers"));

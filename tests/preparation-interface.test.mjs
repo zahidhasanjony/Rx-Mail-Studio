@@ -1,3 +1,4 @@
+import { enterDevice } from "./enter-workspace.mjs";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -23,6 +24,7 @@ test('compiled dashboard assigns only the eye preparation and compares its own r
   const byLabel=label=>w.document.querySelector(`[aria-label="${label}"]`);
   try {
     w.eval(code.replaceAll('import.meta.url','"https://rx-mail-studio.test/"'));
+    await enterDevice(w);
     await wait(()=>byLabel('View Unclassified brands'));
     const total=w.document.querySelectorAll('.rx-kpi>strong')[2].title;
     byLabel('View Unclassified brands').click();

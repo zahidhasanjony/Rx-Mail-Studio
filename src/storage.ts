@@ -1,4 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
+import { cloudConfigured, supabase } from "./cloud-client";
+export { cloudConfigured, supabase } from "./cloud-client";
 import type { Dataset, Workspace, RxFact, BrandProfile } from "./types";
 import { defaultSettings, emptyWorkspace, settingsForNewUser } from "./types";
 import { reconcileBrandPairs, brandPairKey } from "./catalogue";
@@ -30,16 +31,6 @@ export async function assignCloudDashboardTG(generic: string, brand: string, com
   const result = await supabase.rpc('rxm_assign_preparation_tg', { generic_name: generic, brand_name: brand, company_names: companies, dosage_forms: forms, target_tg: tg });
   if (result.error) throw new Error(result.error.message);
 }
-export const cloudConfigured = Boolean(
-  import.meta.env.VITE_SUPABASE_URL &&
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-);
-export const supabase = cloudConfigured
-  ? createClient(
-      import.meta.env.VITE_SUPABASE_URL,
-      import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-    )
-  : null;
 export type Mode = "local" | "cloud" | "demo";
 async function db() {
   return new Promise<IDBDatabase>((resolve, reject) => {
@@ -239,6 +230,7 @@ export async function cloudHydrate(
   month: string,
   profile: BrandProfile,
   endMonth = month,
+  signal?: AbortSignal,
 ) {
   if (!supabase) throw new Error("Cloud connection missing");
   const generics = reportGenericNames(profile);
@@ -259,13 +251,13 @@ export async function cloudHydrate(
       .in("month", reportingMonths(month, endMonth))
       .in("generic", generics)
       .order("id")
-      .range(offset, offset + 99);
+      .range(offset, offset + 99).abortSignal(signal || AbortSignal.timeout(20000));
     fail(r.error);
-    for (const chunk of r.data || [])
-      facts.set(chunk.dataset_id, [
-        ...(facts.get(chunk.dataset_id) || []),
-        ...chunk.payload,
-      ]);
+    for (const chunk of r.data || []) {
+      const rows = facts.get(chunk.dataset_id) || [];
+      for (const fact of chunk.payload) rows.push(fact);
+      facts.set(chunk.dataset_id, rows);
+    }
     if ((r.data?.length || 0) < 100) break;
     offset += 100;
   }

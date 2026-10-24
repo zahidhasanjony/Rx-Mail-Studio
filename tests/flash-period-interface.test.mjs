@@ -1,3 +1,4 @@
+import { enterDevice } from "./enter-workspace.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -52,6 +53,7 @@ test("production UI carries the last month's Flash into preview, generated mail,
     const label = `June'26–October'26 ${flash} Flash`;
     try {
       w.eval(code.replaceAll("import.meta.url", '"https://rx-mail-studio.test/"'));
+    await enterDevice(w);
       await waitFor(() => w.document.querySelectorAll(".queue-table tbody tr").length === 6);
       const from = w.document.querySelector('[aria-label="From month"]');
       Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, "value").set.call(from, "2026-06");

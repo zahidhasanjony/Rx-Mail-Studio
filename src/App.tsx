@@ -88,6 +88,8 @@ import {
 } from "./storage";
 import type { Mode } from "./storage";
 import { usernameSignIn, currentAccount, AccountServiceError } from "./auth";
+import LoginPage from "./LoginPage";
+import { storageValue, savedUsername, rememberUsername, saveBrowserPassword, withDeadline } from "./startup";
 import type { UserAccount } from "./auth";
 import UsersPage from "./UsersPage";
 import AndroidMailQueue from "./AndroidMailQueue";
@@ -449,17 +451,20 @@ function BrandPicker({
 }
 
 export default function App() {
-  const initialChoice = useRef(false);
+  const [entered, setEntered] = useState(false);
+  const [remember, setRemember] = useState(() => !!savedUsername());
+  const connectionAttempt = useRef(0);
+  const hydratedSelection = useRef("");
   const [androidQueue, setAndroidQueue] = useState<{ batch: Pick<Batch, "id" | "mails"> & { settings: Pick<Settings, "email"> & Partial<Pick<Settings, "name">> }; initialMailId?: string } | null>(null);
   const [bridgeConnected, setBridgeConnected] = useState(false),
     [bridgeAuto, setBridgeAuto] = useState(
-      localStorage.getItem("rxm-bridge-auto-v2") === "true",
+      storageValue("rxm-bridge-auto-v2") === "true",
     );
   const [workspace, setWorkspace] = useState<Workspace>(emptyWorkspace),
     [mode, setMode] = useState<Mode>("local"),
     [page, setPage] = useState<Page>(() => new URLSearchParams(window.location.search).get('view') === 'dashboard' ? 'dashboard' : 'generate');
   const [busy, setBusy] = useState(false),
-    [loading, setLoading] = useState(true),
+    [loading, setLoading] = useState(false),
     [progress, setProgress] = useState(0),
     [busyText, setBusyText] = useState(""),
     [toast, setToast] = useState<{ text: string; error?: boolean } | null>(
@@ -494,9 +499,8 @@ export default function App() {
       createdAt?: string;
     } | null>(null),
     [batchModal, setBatchModal] = useState<Batch | null>(null),
-    [login, setLogin] = useState(false),
     [userEmail, setUserEmail] = useState(""),
-    [username, setUsername] = useState(""),
+    [username, setUsername] = useState(savedUsername),
     [password, setPassword] = useState(""),
     [account, setAccount] = useState<UserAccount | null>(null);
   const sourceFlow = useRef<SourceImportControl | null>(null);
@@ -554,33 +558,12 @@ export default function App() {
     setSettingsDraft(workspace.settings);
   }, [workspace]);
   useEffect(() => {
-    if (toast) {
+    if (toast && entered) {
       const t = setTimeout(() => setToast(null), 7000);
       return () => clearTimeout(t);
     }
-  }, [toast]);
-  useEffect(() => {
-    let alive = true;
-    localLoad()
-      .then((w) => {
-        if (alive && !initialChoice.current) {
-          setWorkspace(w);
-          setLoading(false);
-          const last = w.datasets
-            .filter((d) => d.active)
-            .sort((a, b) => b.to.localeCompare(a.to))[0];
-          if (last) { setMonth(last.to.slice(0, 7)); setEndMonth(last.to.slice(0, 7)); }
-        }
-      })
-      .catch((e) => {
-        setLoading(false);
-        notify(e.message, true);
-      });
-    return () => {
-      alive = false;
-      worker.current?.terminate();
-    };
-  }, []);
+  }, [toast, entered]);
+  useEffect(() => () => { worker.current?.terminate(); }, []);
   useEffect(() => {
     if (!supabase) return;
     const {
@@ -591,40 +574,12 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
   useEffect(() => {
-    let alive = true;
-    if (!userEmail) {
-      setAccount(null);
-      if (mode === "cloud") {
-        setWorkspace(emptyWorkspace()); setMode("local");
-        setPreview(null); setBatchModal(null); setAndroidQueue(null);
-      }
-      return;
+    if (!userEmail && mode === "cloud") {
+      connectionAttempt.current++;
+      setAccount(null); setWorkspace(emptyWorkspace()); setMode("local"); setEntered(false);
+      setPreview(null); setBatchModal(null); setAndroidQueue(null);
     }
-    // Restore a saved login outside the Supabase auth callback to avoid its session lock.
-    const restoreCloud = !initialChoice.current;
-    if (restoreCloud) { initialChoice.current = true; setLoading(true); }
-    currentAccount().then(async value => {
-      if (!alive) return;
-      setAccount(value);
-      if (restoreCloud) {
-        const saved = await cloudLoad();
-        if (!alive) return;
-        workspaceRef.current = saved; setWorkspace(saved); setMode("cloud");
-        const last = saved.datasets.filter(d => d.active).sort((a, b) => b.to.localeCompare(a.to))[0];
-        if (last) { setMonth(last.to.slice(0, 7)); setEndMonth(last.to.slice(0, 7)); }
-      }
-    }).catch(async e => {
-      if (!alive) return;
-      setAccount(null);
-      notify((e as Error).message, true);
-      if (restoreCloud) setLoading(false);
-      if (e instanceof AccountServiceError && [401, 403].includes(e.status)) {
-        setWorkspace(emptyWorkspace()); setMode("local"); setLogin(true); setPassword("");
-        await supabase?.auth.signOut({ scope: "local" });
-      }
-    }).finally(() => { if (alive && restoreCloud) setLoading(false); });
-    return () => { alive = false; };
-  }, [userEmail]);
+  }, [userEmail, mode]);
   useEffect(() => {
     if (page === "users" && (mode !== "cloud" || account?.role !== "owner")) setPage("settings");
   }, [page, mode, account?.role]);
@@ -632,7 +587,7 @@ export default function App() {
   useEffect(() => {
     if (profile) { selectedBrand.current = profile; if (profileId !== profile.id) setProfileId(profile.id); }
   }, [profile, profileId]);
-  const visibleBrandPairs = searchBrandPairs(workspace.profiles, brandSearch);
+  const visibleBrandPairs = useMemo(() => searchBrandPairs(workspace.profiles, brandSearch), [workspace.profiles, brandSearch]);
   const additionalGenerics = profile ? extraGenerics[profile.id] || [] : [];
   const genericOptions = useMemo(() => {
     const names = [...workspace.profiles.map(p => p.generic), ...workspace.datasets.flatMap(datasetGenericNames), ...additionalGenerics];
@@ -651,13 +606,18 @@ export default function App() {
     forms: dosageForm !== "all" && formsForSelection.includes(dosageForm) ? [dosageForm] : additionalGenerics.length ? [] : profile.forms,
   } : undefined, [profile, dosageForm, additionalGenerics.join("|"), formsForSelection]);
   useEffect(() => setDosageForm("all"), [profileId]);
+  const needsReports = entered && page === "generate";
   useEffect(() => {
-    if (mode !== "cloud" || !profile || page === 'dashboard') return;
+    if (!needsReports || mode !== "cloud" || !profile) { setLoading(false); return; }
+    const selection = JSON.stringify([month, endMonth, reportGenericNames(marketProfile!), workspaceRef.current.datasets.map(d => [d.id, d.active, d.hash])]);
+    if (hydratedSelection.current === selection) { setLoading(false); return; }
     let alive = true;
     setLoading(true);
-    cloudHydrate(workspaceRef.current.datasets, month, marketProfile!, endMonth)
+    const controller = new AbortController();
+    cloudHydrate(workspaceRef.current.datasets, month, marketProfile!, endMonth, controller.signal)
       .then((ds) => {
         if (alive) {
+          hydratedSelection.current = selection;
           setWorkspace((w) => ({ ...w, datasets: ds }));
           setLoading(false);
         }
@@ -669,30 +629,30 @@ export default function App() {
         }
       });
     return () => {
-      alive = false;
+      alive = false; controller.abort();
     };
   }, [
     mode,
-    page === 'dashboard',
+    needsReports,
     month,
     endMonth,
     profile?.generic,
     profile?.aliases?.join(","),
     additionalGenerics.join("|"),
-    workspace.datasets.map((d) => d.id + ":" + d.active).join(","),
+    workspace.datasets.map((d) => d.id + ":" + d.active + ":" + d.hash).join(","),
   ]);
   const structureList: Structure[] =
     structure === "Both" ? ["ACD", "CCD"] : [structure];
-  const marketSources = workspace.datasets.filter(
+  const marketSources = useMemo(() => workspace.datasets.filter(
     (d) =>
       !d.includedGenerics ||
       d.includedGenerics.some((g) =>
         (marketProfile ? reportGenericNames(marketProfile) : [])
           .includes(normalize(g)),
       ),
-  );
-  const activeSources = eligibleDatasets(marketSources, month, endMonth),
-    days = coverage(marketSources, month, endMonth),
+  ), [workspace.datasets, marketProfile]);
+  const activeSources = useMemo(() => eligibleDatasets(marketSources, month, endMonth), [marketSources, month, endMonth]),
+    days = useMemo(() => coverage(marketSources, month, endMonth), [marketSources, month, endMonth]),
     lastDay = selectedMonths.reduce((sum, m) => sum + new Date(Number(m.slice(0, 4)), Number(m.slice(5)), 0).getDate(), 0);
   const periodLabel = reportingPeriod(month, endMonth, period, days);
   const selectedDays = days.filter(date => period === "all" ||
@@ -711,7 +671,7 @@ export default function App() {
   );
   const reportList = useMemo(
     () =>
-      marketProfile
+      needsReports && marketProfile
         ? reports(
             workspace.datasets,
             month,
@@ -721,12 +681,12 @@ export default function App() {
             endMonth,
           )
         : [],
-    [workspace.datasets, month, endMonth, marketProfile, structure, period],
+    [needsReports, workspace.datasets, month, endMonth, marketProfile, structure, period],
   );
-  const national = useMemo(() => marketProfile
+  const national = useMemo(() => needsReports && marketProfile
     ? nationalRxShare(workspace.datasets, month, marketProfile, period, [], endMonth)
     : { total: 0, own: 0, share: null, available: false, reason: "Choose a brand / generic." },
-    [workspace.datasets, month, endMonth, marketProfile, period]);
+    [needsReports, workspace.datasets, month, endMonth, marketProfile, period]);
   const specialtyOptions = useMemo(() => reportSpecialties(reportList), [reportList]);
   const chosenSpecialty = specialtyOptions.some(s => s.value === specialty) ? specialty : "";
   const doctorLimitValue = doctorMode === "top" ? Number(doctorLimit) : undefined;
@@ -793,7 +753,6 @@ export default function App() {
     } catch (e) { notify((e as Error).message, true); }
   };
   async function update(next: Workspace) {
-    initialChoice.current = true;
     setBusy(true);
     setBusyText("Saving workspace");
     try {
@@ -814,20 +773,21 @@ export default function App() {
     }
   }
   async function switchLocal() {
-    initialChoice.current = true;
-    setLoading(true);
+    const attempt = ++connectionAttempt.current;
+    setBusy(false); setLoading(true); setPassword(""); setToast(null);
     try {
-      const w = await localLoad();
-      setWorkspace(w);
-      setMode("local");
+      const w = await withDeadline(localLoad(), "Device memory is taking too long to open. Close other app tabs and try again.", 10000);
+      if (attempt !== connectionAttempt.current) return;
+      workspaceRef.current = w; setWorkspace(w);
+      setMode("local"); setEntered(true);
       const last = w.datasets
         .filter((d) => d.active)
         .sort((a, b) => b.to.localeCompare(a.to))[0];
       if (last) { setMonth(last.to.slice(0, 7)); setEndMonth(last.to.slice(0, 7)); }
     } catch (e) {
-      notify((e as Error).message, true);
+      if (attempt === connectionAttempt.current) notify((e as Error).message, true);
     } finally {
-      setLoading(false);
+      if (attempt === connectionAttempt.current) setLoading(false);
     }
   }
   function runWorker<T>(
@@ -1139,76 +1099,59 @@ export default function App() {
       setBusy(false);
     }
   }
+  function applyCloudWorkspace(w: Workspace, value: UserAccount) {
+    hydratedSelection.current = "";
+    workspaceRef.current = w; setWorkspace(w); setAccount(value); setMode("cloud");
+    setEntered(true); setLoading(false);
+    const last = w.datasets.filter(d => d.active).sort((a, b) => b.to.localeCompare(a.to))[0];
+    if (last) { setMonth(last.to.slice(0, 7)); setEndMonth(last.to.slice(0, 7)); }
+  }
   async function loginSubmit() {
-    if (!supabase) {
-      notify(
-        "Cloud is waiting for Supabase configuration. Your device workspace is available.",
-        true,
-      );
-      return;
-    }
-    initialChoice.current = true;
-    setBusy(true);
-    setBusyText("Connecting to Supabase");
+    if (!supabase) { notify("Cloud connection is unavailable. Use Device Memory to continue.", true); return; }
+    const attempt = ++connectionAttempt.current;
+    setBusy(true); setBusyText("Signing in…"); setToast(null);
+    const loginPassword = password;
     try {
-      const signedIn = await usernameSignIn(username, password);
-      setAccount(signedIn);
-      setPassword("");
-      const w = await cloudLoad();
-      workspaceRef.current = w;
-      setWorkspace(w);
-      setMode("cloud");
-      const last = w.datasets.filter(d => d.active).sort((a, b) => b.to.localeCompare(a.to))[0];
-      if (last) { setMonth(last.to.slice(0, 7)); setEndMonth(last.to.slice(0, 7)); }
-      setLogin(false);
+      const signedIn = await withDeadline(usernameSignIn(username.trim(), loginPassword), "Sign-in took too long. Check your connection and try again.");
+      if (attempt !== connectionAttempt.current) return;
+      setBusyText("Opening cloud data…");
+      const w = await withDeadline(cloudLoad(), "Cloud data took too long to load. Retry or use device memory.");
+      if (attempt !== connectionAttempt.current) return;
+      rememberUsername(signedIn.username, remember);
+      if (remember) void saveBrowserPassword(signedIn.username, loginPassword);
+      setPassword(""); applyCloudWorkspace(w, signedIn);
       notify("Connected to your SBM cloud workspace");
-    } catch (e) {
-      notify((e as Error).message, true);
-    } finally {
-      setBusy(false);
-    }
+    } catch (e) { if (attempt === connectionAttempt.current) notify((e as Error).message, true); }
+    finally { if (attempt === connectionAttempt.current) setBusy(false); }
   }
   async function openCloud() {
-    initialChoice.current = true;
-    if (!cloudConfigured) {
-      setLogin(true);
-      return;
-    }
-    if (!userEmail) {
-      setLogin(true);
-      return;
-    }
-    setLoading(true);
+    if (!cloudConfigured || !userEmail) { setEntered(false); return; }
+    const attempt = ++connectionAttempt.current;
+    setBusy(true); setBusyText("Opening cloud data…"); setToast(null);
     try {
-      setAccount(await currentAccount());
-      setWorkspace(await cloudLoad());
-      setMode("cloud");
-      notify("Cloud workspace opened");
+      const value = await withDeadline(currentAccount(), "Your saved sign-in could not be checked. Retry or sign in again.");
+      const w = await withDeadline(cloudLoad(), "Cloud data took too long to load. Retry or use device memory.");
+      if (attempt !== connectionAttempt.current) return;
+      applyCloudWorkspace(w, value); setPassword(""); notify("Cloud workspace opened");
     } catch (e) {
+      if (attempt !== connectionAttempt.current) return;
       if (e instanceof AccountServiceError && [401, 403].includes(e.status)) {
-        await supabase?.auth.signOut({ scope: "local" });
-        setAccount(null);
-        setPassword("");
-        setLogin(true);
+        setAccount(null); setPassword(""); setEntered(false);
+        void supabase?.auth.signOut({ scope: "local" });
       }
       notify((e as Error).message, true);
-    } finally {
-      setLoading(false);
-    }
+    } finally { if (attempt === connectionAttempt.current) setBusy(false); }
   }
   async function signOutAccount() {
-    setBusy(true); setBusyText("Signing out");
+    connectionAttempt.current++; setBusy(true); setBusyText("Signing out");
     try {
-      setAndroidQueue(null);
-      const result = await supabase?.auth.signOut({ scope: "local" });
+      const result = await withDeadline(supabase!.auth.signOut({ scope: "local" }), "Sign-out took too long. Please retry.");
       if (result?.error) throw result.error;
-      setAccount(null); setUserEmail("");
-      setPassword(""); setUsername(""); setLogin(false);
-      setPreview(null); setBatchModal(null); setDeleteSource(null); setDeleteBrand(null);
+      setAccount(null); setUserEmail(""); setPassword(""); setUsername(savedUsername());
+      setPreview(null); setBatchModal(null); setDeleteSource(null); setDeleteBrand(null); setAndroidQueue(null);
       setHierarchyMap(null); setPendingHierarchy(null); setEditingRow(null);
       workspaceRef.current = emptyWorkspace(); setWorkspace(emptyWorkspace()); setMode("local");
-      await switchLocal();
-      notify("Signed out");
+      setEntered(false); setLoading(false); setToast(null);
     } catch (e) { notify((e as Error).message, true); }
     finally { setBusy(false); }
   }
@@ -1261,7 +1204,6 @@ export default function App() {
     }
   }
   const demo = () => {
-    initialChoice.current = true;
     setWorkspace(demoWorkspace());
     setMode("demo");
     setMonth("2026-06");
@@ -1269,6 +1211,10 @@ export default function App() {
     setProfileId("tofen");
     setPage("generate");
   };
+  if (!entered) return <LoginPage username={username} password={password} remember={remember}
+    busy={busy || loading} message={busy ? busyText : "Opening device data…"} error={toast?.error ? toast.text : undefined}
+    configured={cloudConfigured} session={!!userEmail} onUsername={setUsername} onPassword={setPassword}
+    onRemember={value => { setRemember(value); if (!value) rememberUsername("", false); }} onLogin={() => void loginSubmit()} onLocal={() => void switchLocal()} onContinue={() => void openCloud()}/>;
   return (
     <div className={`app-shell ${page === 'dashboard' ? 'dashboard-active' : ''}`}>
       <aside className={`sidebar ${mobileNav ? "mobile-open" : ""}`}>
@@ -1350,7 +1296,7 @@ export default function App() {
             </button>
             {account && <span className="account-identity">{account.username}<small>{account.role === "owner" ? "Admin" : account.role === "editor" ? "Editor" : "Member"}</small></span>}
             {userEmail ? <Button className="top-account-action" variant="text" disabled={busy} onClick={signOutAccount}><LogOut size={15} />Sign out</Button> :
-              <Button className="top-account-action" variant="secondary" disabled={busy} onClick={() => { initialChoice.current = true; setLogin(true); }}><Users size={15} />Sign in</Button>}
+              <Button className="top-account-action" variant="secondary" disabled={busy} onClick={() => { setEntered(false); setToast(null); }}><Users size={15} />Sign in</Button>}
           </div>
         </header>
         <main>
@@ -2440,7 +2386,7 @@ export default function App() {
                           "Sign in to your cloud account before importing device data.",
                           true,
                         );
-                        setLogin(true);
+                        setEntered(false); setToast(null);
                         return;
                       }
                       setBusy(true);
@@ -3239,54 +3185,7 @@ export default function App() {
           }
         }} /></div>
       </Modal>}
-      {login && (
-        <Modal
-          title="Connect your SBM workspace"
-          onClose={() => { setLogin(false); setPassword(""); }}
-        >
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void loginSubmit();
-            }}
-          >
-            <div className="modal-body">
-              <div className="notice">
-                <ShieldCheck size={18} />
-                <span>
-                  {cloudConfigured
-                    ? "Sign in with the username and password created by your admin. No email confirmation is needed."
-                    : "Cloud connection is not configured yet. Device imports, calculations and email preparation remain available."}
-                </span>
-              </div>
-              <Field label="Username">
-                <input autoComplete="username" aria-label="Username" value={username} required minLength={2} maxLength={32} onChange={(e) => setUsername(e.target.value)} />
-              </Field>
-              <Field label="Password">
-                <input
-                  autoComplete="current-password"
-                  aria-label="Password"
-                  type="password"
-                  minLength={4}
-                  maxLength={128}
-                  value={password}
-                  required
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </Field>
-            </div>
-            <div className="modal-footer">
-              <Button variant="secondary" onClick={() => { setLogin(false); setPassword(""); }}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={busy || !cloudConfigured}>
-                Sign in
-                <ArrowRight size={16} />
-              </Button>
-            </div>
-          </form>
-        </Modal>
-      )}
+
     </div>
   );
 }

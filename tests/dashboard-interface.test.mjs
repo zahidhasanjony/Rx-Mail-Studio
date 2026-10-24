@@ -1,3 +1,4 @@
+import { enterDevice } from "./enter-workspace.mjs";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -23,6 +24,7 @@ test('mobile dashboard switches between single month and range, opens TG brands 
   const button=text=>[...w.document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
   try {
     w.eval(code.replaceAll('import.meta.url','"https://rx-mail-studio.test/"'));
+    await enterDevice(w);
     await waitFor(()=>w.document.querySelectorAll('.queue-table tbody tr').length===6);
     const bottomButtons=[...w.document.querySelectorAll('.mobile-bottom button')];
     assert.deepEqual(bottomButtons.map(b=>b.textContent.trim()),['Dashboard','Generate','Sources','Hierarchy','Settings']);
@@ -88,6 +90,7 @@ test('direct dashboard link opens the separate dashboard while the normal URL st
     Object.defineProperty(w,'crypto',{value:webcrypto});Object.defineProperty(w,'indexedDB',{value:new IDBFactory()});Object.defineProperty(w,'IDBKeyRange',{value:IDBKeyRange});Object.assign(w,{structuredClone,TextEncoder,TextDecoder,Blob});
     try {
       w.eval(code.replaceAll('import.meta.url','"https://rx-mail-studio.test/"'));
+    await enterDevice(w);
       const selector=suffix.includes('dashboard')?'.rx-dashboard':'.batch-download-choice select';
       for(let i=0;i<150&&!w.document.querySelector(selector);i++)await new Promise(r=>setTimeout(r,15));
       assert.ok(w.document.querySelector(selector),suffix+' should open its requested page');

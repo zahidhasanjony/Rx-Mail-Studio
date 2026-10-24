@@ -1,3 +1,4 @@
+import { enterDevice } from "./enter-workspace.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -46,6 +47,7 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
     downloads.push({ name: this.download, blob: blobs.get(this.href) });
   };
   w.eval(code.replaceAll("import.meta.url", '"https://rx-mail-studio.test/"'));
+    await enterDevice(w);
   const waitFor = async (check) => {
     for (let i = 0; i < 100; i++) {
       if (check()) return;
@@ -280,7 +282,7 @@ test("production UI loads, previews a regional email, and creates a frozen sampl
     assert.ok(w.document.querySelector('[autocomplete="username"]'));
     assert.equal(w.document.querySelector('[aria-label="Password"]').minLength, 4);
     assert.ok(!w.document.querySelector('.modal input[type="email"]'));
-    assert.ok(!w.document.querySelector('.modal').textContent.includes("Create account"));
+    assert.ok(!w.document.querySelector('.login-card').textContent.includes("Create account"));
     assert.deepEqual(errors, []);
   } finally {
     w.close();

@@ -9,11 +9,7 @@ test("a render failure shows recovery controls instead of a blank app", async ()
   const code = await readFile(new URL("../dist" + js, import.meta.url), "utf8");
   const dom = new JSDOM('<div id="root"></div>', { url: "https://rxmail.vercel.app/", runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
   try {
-    const getItem = dom.window.Storage.prototype.getItem;
-    dom.window.Storage.prototype.getItem = function(key) {
-      if (key === "rxm-bridge-auto-v2") throw new Error("Device storage unavailable");
-      return getItem.call(this, key);
-    };
+    Object.defineProperty(dom.window, "innerWidth", { get() { throw new Error("Unexpected rendering failure"); } });
     dom.window.eval(code.replaceAll("import.meta.url", '"https://rxmail.vercel.app/"'));
     for (let i = 0; i < 100 && !dom.window.document.querySelector('[role="alert"]'); i++) await new Promise(r => setTimeout(r, 10));
     assert.match(dom.window.document.body.textContent, /The app could not open/);

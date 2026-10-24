@@ -1,4 +1,4 @@
-import { supabase } from "./storage";
+import { supabase } from "./cloud-client";
 export type UserRole = "owner" | "editor" | "member";
 export interface UserAccount {
   id: string; username: string; name: string; role: UserRole;

@@ -20,10 +20,14 @@ test("compiled login restores the cloud indicator, preserves admin page access a
     const html = await readFile(join(output, "index.html"), "utf8");
     const script = html.match(/src="(\/assets\/index-[^"]+\.js)"/)[1];
     const code = await readFile(join(output, script), "utf8");
-    for (const scenario of ["owner", "editor", "member", "restored-owner", "restored-member", "stale"]) {
+    for (const scenario of ["owner", "editor", "member", "restored-owner", "restored-member", "stale", "slow", "offline"]) {
       const role = scenario.startsWith("restored-") ? scenario.slice(9) : scenario;
       const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "https://rxmail.vercel.app/", runScripts: "outside-only", pretendToBeVisual: true });
       const w = dom.window, calls = [], errors = [];
+      let releaseLogin; const delayedLogin = new Promise(resolve => { releaseLogin = resolve; });
+      const passwordSaves = [];
+      w.PasswordCredential = class { constructor(data) { Object.assign(this, data); } };
+      Object.defineProperty(w.navigator, "credentials", { value: { store: async credential => { passwordSaves.push(credential); } } });
       const account = { id: "11111111-1111-4111-8111-111111111111", username: role === "owner" ? "ZHD" : "TEAM", name: "Test account", role: role === "stale" ? "member" : role, active: true, createdAt: "2026-01-01" };
       const jwt = [Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url"), Buffer.from(JSON.stringify({ sub: account.id, email: "owner@example.com", exp: Math.floor(Date.now()/1000)+3600, role: "authenticated" })).toString("base64url"), Buffer.alloc(32, 1).toString("base64url")].join(".");
       const accounts = [account];
@@ -76,6 +80,8 @@ test("compiled login restores the cloud indicator, preserves admin page access a
         }
         if (url.pathname.endsWith("/rxm-auth")) {
           calls.push(body);
+          if (body.action === "login" && scenario === "offline") throw new TypeError("Failed to fetch");
+          if (body.action === "login" && scenario === "slow") await delayedLogin;
           if (body.action === "login") return response({ account, access_token: jwt, refresh_token: "refresh-test-token" });
           if (body.action === "me" && role === "stale") return new Response(JSON.stringify({ error: "Please sign in again." }), { status: 401, headers: { "Content-Type": "application/json" } });
           if (body.action === "me") return response({ account });
@@ -90,24 +96,41 @@ test("compiled login restores the cloud indicator, preserves admin page access a
       const fill = (input, value) => { Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, "value").set.call(input, value); input.dispatchEvent(new w.Event("input", { bubbles: true })); };
       try {
         w.eval(code.replaceAll("import.meta.url", '"https://rxmail.vercel.app/"'));
-        await waitFor(() => button("Settings"));
+        await waitFor(() => w.document.querySelector('[aria-label="Username"]'));
+        assert.equal(requests.length, 0, "The login page does not download cloud data before a mode is chosen");
+        assert.equal(calls.length, 0, "Saved sessions do not delay or bypass the login page");
         if (role === "stale") {
+          await waitFor(() => button("Open cloud workspace")); button("Open cloud workspace").click();
           await waitFor(() => w.document.querySelector('[aria-label="Username"]'));
-          assert.ok(calls.some((c) => c.action === "me"));
+          await waitFor(() => calls.some((c) => c.action === "me"));
           await waitFor(() => w.localStorage.getItem("sb-rx-project-auth-token") === null);
           assert.ok(button("Sign in")); assert.ok(!button("Admin controls"));
           assert.deepEqual(errors, []); continue;
         }
         if (!scenario.startsWith("restored-")) {
-          button("Sign in").click();
           await waitFor(() => w.document.querySelector('[aria-label="Username"]'));
           fill(w.document.querySelector('[aria-label="Username"]'), account.username); fill(w.document.querySelector('[aria-label="Password"]'), "abcd");
-          w.document.querySelector('.modal form').dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
+          w.document.querySelector('.login-remember input').click();
+          w.document.querySelector('.login-card form').dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
+          if (["slow", "offline"].includes(scenario)) {
+            await waitFor(() => calls.some(c => c.action === "login"));
+            if (scenario === "offline") { await waitFor(() => w.document.querySelector('.login-error')); assert.ok(!button("Sign in").disabled); }
+            w.document.querySelector('.login-device').click();
+            await waitFor(() => w.document.querySelector('[aria-label="On this device"]'));
+            releaseLogin(); await new Promise(resolve => setTimeout(resolve, 80));
+            assert.ok(!w.document.querySelector('[aria-label="Cloud connected"]'), "A late sign-in cannot overwrite an explicit device choice");
+            assert.equal(requests.length, 0, "Device choice does not download any cloud workspace");
+            assert.equal(passwordSaves.length, 0); assert.deepEqual(errors, []); continue;
+          }
           await waitFor(() => w.document.querySelector('.mode-pill[aria-label="Cloud connected"]'));
+          assert.equal(w.localStorage.getItem("rxm-username-v1"), account.username);
+          assert.equal(passwordSaves[0]?.password, "abcd");
+          assert.ok(!Object.values(w.localStorage).some(value => value.includes('abcd')), "Never store the password in web storage");
           assert.deepEqual(calls.find((c) => c.action === "login"), { action: "login", username: account.username, password: "abcd" });
         } else {
+          await waitFor(() => button("Open cloud workspace")); button("Open cloud workspace").click();
           await waitFor(() => w.document.querySelector('.mode-pill[aria-label="Cloud connected"]'));
-          assert.ok(!calls.some(c => c.action === "login"), "A saved verified session restores cloud mode without another login");
+          assert.ok(!calls.some(c => c.action === "login"), "A saved verified session opens cloud mode without another password");
         }
         await waitFor(() => button("Sign out"));
         assert.ok(w.document.querySelector(".topbar").textContent.includes(account.username));
@@ -209,7 +232,9 @@ test("compiled login restores the cloud indicator, preserves admin page access a
         await waitFor(() => button("Sign in") && !w.document.querySelector('.mode-pill[aria-label="Cloud connected"]'));
         assert.equal(w.localStorage.getItem("sb-rx-project-auth-token"), null);
         assert.ok(!button("Admin controls")); assert.ok(!button("Users"));
-        button("Source files").click();
+        await waitFor(() => w.document.querySelector('.login-device'));
+        w.document.querySelector('.login-device').click();
+        await waitFor(() => button("Source files")); button("Source files").click();
         await waitFor(() => w.document.body.textContent.includes("No source files yet"));
         assert.ok(!w.document.querySelector(".source-row"), "Signing out does not leave cloud imports visible in the device workspace");
         assert.deepEqual(errors, []);
