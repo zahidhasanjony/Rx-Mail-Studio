@@ -9,6 +9,8 @@ import { templateError } from "./email-template";
 import type { EmailTemplate, Hierarchy } from "./types";
 import { normalize, overlaps } from "./engine";
 import { importFactBatches } from "./import-staging";
+import type { BatchSummary } from "./batch-history";
+import type { Batch } from "./types";
 import type { DashboardRow } from './dashboard-model';
 export async function cloudDashboard(from: string, to: string, signal: AbortSignal): Promise<DashboardRow[]> {
   if (!supabase) throw new Error('Cloud connection missing');
@@ -187,11 +189,8 @@ export async function cloudLoad(): Promise<Workspace> {
       .select("*")
       .order("created_at", { ascending: false }),
     catalogue.then(value => ({ data: value.profiles, error: null })),
-    supabase
-      .from("rxm_batches")
-      .select("*")
-      .eq("user_id", user.user.id)
-      .order("created_at", { ascending: false }),
+    // Batch HTML can be tens of MB. It must never be on the sign-in path.
+    Promise.resolve({ data: [] as { payload: Batch }[], error: null }),
     supabase
       .from("rxm_settings")
       .select("payload")
@@ -384,4 +383,22 @@ export async function cloudSave(
     const catalogue = await cloudCatalogue();
     return { ...catalogue, profiles: reconcileBrandPairs(catalogue.profiles, next.datasets, catalogue.deletedBrandPairs) };
   }
+}
+
+export const HISTORY_PAGE_SIZE = 20;
+export async function cloudBatchHistory(ownerId: string, offset: number, signal: AbortSignal): Promise<BatchSummary[]> {
+  if (!supabase) throw new Error("Cloud connection missing");
+  const result = await supabase.from("rxm_batches").select("id,created_at,summary")
+    .eq("user_id", ownerId).order("created_at", { ascending: false }).order("id")
+    .range(offset, offset + HISTORY_PAGE_SIZE - 1).abortSignal(signal);
+  fail(result.error);
+  return (result.data || []).map(row => ({ ...row.summary, id: row.id, createdAt: row.created_at } as BatchSummary));
+}
+export async function cloudBatch(id: string, signal?: AbortSignal): Promise<Batch> {
+  if (!supabase) throw new Error("Cloud connection missing");
+  const result = await supabase.from("rxm_batches").select("payload").eq("id", id)
+    .abortSignal(signal || AbortSignal.timeout(20000)).single();
+  fail(result.error);
+  if (!result.data?.payload) throw new Error("This batch is unavailable in your account.");
+  return result.data.payload as Batch;
 }

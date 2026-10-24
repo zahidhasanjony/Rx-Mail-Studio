@@ -78,6 +78,7 @@ import {
   localLoad,
   localSave,
   cloudLoad,
+  cloudBatch,
   cloudHydrate,
   cloudSave,
   cloudUpdateCatalogue,
@@ -89,6 +90,7 @@ import {
 import type { Mode } from "./storage";
 import { usernameSignIn, currentAccount, AccountServiceError } from "./auth";
 import LoginPage from "./LoginPage";
+import BatchHistory from "./BatchHistory";
 import { storageValue, savedUsername, rememberUsername, saveBrowserPassword, withDeadline } from "./startup";
 import type { UserAccount } from "./auth";
 import UsersPage from "./UsersPage";
@@ -1112,7 +1114,7 @@ export default function App() {
     setBusy(true); setBusyText("Signing in…"); setToast(null);
     const loginPassword = password;
     try {
-      const signedIn = await withDeadline(usernameSignIn(username.trim(), loginPassword), "Sign-in took too long. Check your connection and try again.");
+      const signedIn = await withDeadline(usernameSignIn(username.trim(), loginPassword), "The sign-in service did not respond in time. Please retry.");
       if (attempt !== connectionAttempt.current) return;
       setBusyText("Opening cloud data…");
       const w = await withDeadline(cloudLoad(), "Cloud data took too long to load. Retry or use device memory.");
@@ -1171,7 +1173,7 @@ export default function App() {
       const result = JSON.parse((await file.text()).replace(/^\uFEFF/, ""));
       if (result.schemaVersion !== 1 || !Array.isArray(result.results))
         throw new Error("Invalid Outlook results file");
-      const batch = workspace.batches.find((b) => b.id === result.batchId);
+      const batch = workspaceRef.current.batches.find((b) => b.id === result.batchId) || (mode === "cloud" ? await cloudBatch(String(result.batchId)) : undefined);
       if (!batch)
         throw new Error(
           "This result belongs to a different batch or workspace",
@@ -1190,10 +1192,8 @@ export default function App() {
       });
       if (
         await update({
-          ...workspace,
-          batches: workspace.batches.map((b) =>
-            b.id === batch.id ? { ...b, mails } : b,
-          ),
+          ...workspaceRef.current,
+          batches: [{ ...batch, mails }, ...workspaceRef.current.batches.filter(b => b.id !== batch.id)],
         })
       )
         notify("Outlook opening results recorded");
@@ -2089,84 +2089,9 @@ export default function App() {
               </div>
             </>
           )}
-          {page === "history" && (
-            <section className="card">
-              <div className="card-header">
-                <div>
-                  <h2>Prepared batches</h2>
-                </div>
-                <span className="count-badge">{workspace.batches.length}</span>
-              </div>
-              {workspace.batches.length ? (
-                <div className="batch-list">
-                  {workspace.batches.map((b) => (
-                    <div className="batch-row" key={b.id}>
-                      <div className="file-icon">
-                        <Mail size={21} />
-                      </div>
-                      <div className="source-info">
-                        <strong>
-                          {b.brand} · {b.generic}
-                        </strong>
-                        <small>
-                          {b.periodLabel || reportingPeriod(b.month, b.endMonth || b.month, b.period)} · {b.mails.length} regional
-                          emails ·{" "}
-                          {new Date(b.createdAt).toLocaleString("en-GB")}
-                        </small>
-                        <small>
-                          {b.mails.filter((m) => m.status === "Opened").length}{" "}
-                          opened ·{" "}
-                          {b.mails.filter((m) => m.status === "Failed").length}{" "}
-                          failed ·{" "}
-                          {
-                            b.mails.filter((m) => m.status === "Prepared")
-                              .length
-                          }{" "}
-                          prepared
-                        </small>
-                      </div>
-                      <Button
-                        variant="secondary"
-                        onClick={() => downloadEmlBatch(b)}
-                        aria-label={`Download ${b.brand} ${b.month} .eml ZIP`}
-                      >
-                        <Download size={15} />
-                        .eml ZIP
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        disabled={excelDownloading}
-                        onClick={() => downloadExcelBatch(b)}
-                        aria-label={`Download ${b.brand} ${b.month} Outlook Excel`}
-                      >
-                        <FileSpreadsheet size={15} />
-                        Outlook Excel
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        onClick={() => setBatchModal(b)}
-                      >
-                        View batch
-                        <ArrowRight size={15} />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <Empty
-                  icon={History}
-                  title="Your batch history lives here"
-                  text="Generate your first regional update to keep a frozen record of its recipients, market definition and email content."
-                  action={
-                    <Button onClick={() => setPage("generate")}>
-                      Generate emails
-                      <ArrowRight size={16} />
-                    </Button>
-                  }
-                />
-              )}
-            </section>
-          )}
+          {page === "history" && <BatchHistory batches={workspace.batches} mode={mode} ownerId={account?.id}
+            onLoaded={batch => setWorkspace(w => { const next = { ...w, batches: [batch, ...w.batches.filter(b => b.id !== batch.id)] }; workspaceRef.current = next; return next; })}
+            onView={setBatchModal} onEml={downloadEmlBatch} onExcel={downloadExcelBatch} onGenerate={() => setPage("generate")}/>}
           {page === "settings" && (
             <div className="settings-layout">
               <section className="card settings-card">

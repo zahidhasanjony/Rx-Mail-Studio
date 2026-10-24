@@ -140,3 +140,7 @@ The app starts on a dedicated login page. Opening the page does not read the dev
 **Save username and password** remembers the username and requests password saving through the browser credential manager. The browser may instead offer its native save prompt; availability depends on the browser. Raw passwords are never written to localStorage or IndexedDB. Unchecking the option clears the saved username. Saved cloud sessions remain managed by Supabase and are revoked locally on sign-out.
 
 Startup cloud requests have network timeouts and visible retry errors. Device access remains available during a slow cloud connection; late cloud results cannot overwrite that choice. Email facts load only on Generate emails, and switching away cancels the request. Returning to the same selection reuses already loaded facts. Paging through fact chunks appends into arrays without repeatedly copying previously loaded rows. Report calculations and source selection are memoized. Offline navigation falls back to the cached app after three seconds if the network stalls.
+
+### Sign-in and saved batches
+
+Sign-in no longer reads `rxm_batches`. Batch history reads pages of 20 small summaries; full frozen email contents load only for the selected batch. `20261024151858_batch_history_summaries.sql` adds and backfills summaries, updates them on payload writes, and preserves the existing user isolation policies and original batch payloads. Apply this migration before publishing this client version. Outlook results can fetch an older batch directly, without first opening History.

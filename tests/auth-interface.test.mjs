@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { webcrypto } from "node:crypto";
 import { build } from "vite";
 import { demoWorkspace } from "../src/demo.ts";
+import { summarizeBatch } from "../src/batch-history.ts";
 import { defaultEmailTemplate } from "../src/types.ts";
 import { JSDOM } from "jsdom";
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
@@ -32,6 +33,8 @@ test("compiled login restores the cloud indicator, preserves admin page access a
       const jwt = [Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url"), Buffer.from(JSON.stringify({ sub: account.id, email: "owner@example.com", exp: Math.floor(Date.now()/1000)+3600, role: "authenticated" })).toString("base64url"), Buffer.alloc(32, 1).toString("base64url")].join(".");
       const accounts = [account];
       const sample = demoWorkspace();
+      const frozenBatch = { id: "55555555-5555-4555-8555-555555555555", createdAt: "2026-06-20T10:00:00Z", month: "2026-06", brand: "TOFEN", generic: "Ketotifen", period: "all", sourceIds: [], hierarchyId: "h", settings: sample.settings, profile: sample.profiles[0], mails: [{ id: "mail-one", region: "D5", structure: "ACD", to: { name: "Test RSE", email: "test@example.com" }, cc: [], subject: "Frozen subject", html: "<p>Frozen original email</p>", doctorCount: 1, rxCount: 2, status: "Prepared" }] };
+      let historyAvailable = false;
       const sourceRows = sample.datasets.map(d => ({ id: d.id, active: d.active, complete: true, payload: { ...d, includedGenerics: ['Ketotifen'], availableGenerics: ['Ketotifen','Bilastine'] } }));
       const profileRows = [{ id: "cloud-only", payload: { id: "cloud-only", brand: "CLOUD ONLY", generic: "Example Generic", forms: ["TAB"] } }];
       const deletedPairs = [];
@@ -40,7 +43,7 @@ test("compiled login restores the cloud indicator, preserves admin page access a
 
       if (role === "stale" || scenario.startsWith("restored-")) w.localStorage.setItem("sb-rx-project-auth-token", JSON.stringify({ access_token: jwt, refresh_token: "old-refresh", token_type: "bearer", expires_at: Math.floor(Date.now()/1000)+3600, expires_in: 3600, user: { id: account.id, email: "owner@example.com" } }));
       Object.defineProperty(w, "crypto", { value: webcrypto }); Object.defineProperty(w, "indexedDB", { value: indexedDB }); Object.defineProperty(w, "IDBKeyRange", { value: IDBKeyRange });
-      Object.assign(w, { structuredClone, TextEncoder, TextDecoder, Blob, Headers, Request, Response, AbortSignal });
+      Object.assign(w, { structuredClone, TextEncoder, TextDecoder, Blob, Headers, Request, Response, AbortSignal, AbortController });
       w.addEventListener("error", (e) => errors.push(e.message));
       w.fetch = async (input, options) => {
         const url = new URL(typeof input === "string" ? input : input.url), body = options?.body ? JSON.parse(options.body) : {};
@@ -49,6 +52,16 @@ test("compiled login restores the cloud indicator, preserves admin page access a
         if (url.pathname === "/auth/v1/user") return response({ id: account.id, email: "owner@example.com", email_confirmed_at: "2026-01-01", aud: "authenticated", role: "authenticated", app_metadata: {}, user_metadata: {}, created_at: "2026-01-01" });
         if (url.pathname.startsWith("/rest/v1/")) {
           requests.push({ path: url.pathname, method: options?.method || "GET", body, query: url.search });
+          if (url.pathname.endsWith("/rxm_batches")) {
+            assert.ok(historyAvailable, "Sign-in must not request batch history");
+            if (url.searchParams.get("select") === "payload") {
+              assert.equal(url.searchParams.get("id"), "eq." + frozenBatch.id);
+              return response({ payload: frozenBatch });
+            }
+            assert.equal(url.searchParams.get("select"), "id,created_at,summary");
+            assert.equal(url.searchParams.get("limit"), "20");
+            return response([{ id: frozenBatch.id, created_at: frozenBatch.createdAt, summary: summarizeBatch(frozenBatch) }]);
+          }
           if (url.pathname.endsWith("/rxm_members")) return response([{ email: "owner@example.com", role }]);
           if (url.pathname.endsWith("/rxm_workspace_defaults")) {
             if (options?.method === "POST") { sharedTemplate = body.payload; return response({}); }
@@ -133,6 +146,21 @@ test("compiled login restores the cloud indicator, preserves admin page access a
           assert.ok(!calls.some(c => c.action === "login"), "A saved verified session opens cloud mode without another password");
         }
         await waitFor(() => button("Sign out"));
+        assert.ok(!requests.some(r => r.path.endsWith("/rxm_batches")), "Saved email HTML never blocks sign-in");
+        historyAvailable = true;
+        button("Batch history").click();
+        await waitFor(() => button("View batch"));
+        assert.ok(w.document.querySelector('.batch-row').textContent.includes("1 regional emails"));
+        assert.ok(!requests.some(r => r.path.endsWith("/rxm_batches") && new URLSearchParams(r.query).get("select") === "payload"), "History lists summaries without downloading frozen emails");
+        button("View batch").click();
+        await waitFor(() => w.document.querySelector('.modal'));
+        assert.ok(requests.some(r => r.path.endsWith("/rxm_batches") && new URLSearchParams(r.query).get("id") === "eq." + frozenBatch.id));
+        w.document.querySelector('[aria-label="Preview D5"]').click();
+        await waitFor(() => w.document.querySelector('iframe'));
+        assert.equal(w.document.querySelector('iframe').srcdoc, frozenBatch.mails[0].html, "The selected batch retains its exact frozen email HTML");
+        w.document.querySelector('.modal [aria-label="Close"]').click();
+        await waitFor(() => !w.document.querySelector('iframe'));
+        w.document.querySelector('.modal [aria-label="Close"]').click();
         assert.ok(w.document.querySelector(".topbar").textContent.includes(account.username));
         assert.ok(!button("Admin controls"));
         const cloudDot = w.document.querySelector('.mode-pill[aria-label="Cloud connected"]');
