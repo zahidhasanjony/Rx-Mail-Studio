@@ -2,6 +2,7 @@ import { Unzip, UnzipInflate } from "fflate";
 import { SaxesParser } from "saxes";
 import { isBeximcoCompany } from "./catalogue";
 import { normalize } from "./engine";
+import { preparationKey } from './preparations';
 import type { BrandProfile, Dataset, HierarchyRow, Contact, RxFact } from "./types";
 export interface Sheet {
   name: string;
@@ -241,6 +242,7 @@ export async function importRx(
     catalog = new Map<string, BrandProfile>(),
     availableGenerics = new Set<string>(),
     therapeuticGroups: Record<string, string> = {},
+    preparationGroups: Record<string, string> = {},
     dates = new Set<string>(),
     regions = { ACD: new Set<string>(), CCD: new Set<string>() },
     aseParents = { ACD: new Map<string, Set<string>>(), CCD: new Map<string, Set<string>>() },
@@ -313,6 +315,8 @@ export async function importRx(
         const tgKey = [f.generic, f.brand, f.company].map(normalize).join('\u001f');
         const tg = normalize(get('tg'));
         if (tg) therapeuticGroups[tgKey] = tgKey in therapeuticGroups && therapeuticGroups[tgKey] !== tg ? '' : tg;
+        const formKey = preparationKey(f.generic, f.brand, f.company, f.form);
+        if (tg) preparationGroups[formKey] = formKey in preparationGroups && preparationGroups[formKey] !== tg ? '' : tg;
         dates.add(date);
         for (const [structure, region, mpe, ase] of [
           ["ACD", f.acdRegion, f.acdMpe, f.acdAse],
@@ -416,6 +420,8 @@ export async function importRx(
     includedGenerics: generics,
     availableGenerics: [...availableGenerics].sort(),
     therapeuticGroups,
+    preparationGroups,
+    classificationVersion: 2,
     importedAt: new Date().toISOString(),
     active: true,
     rows,

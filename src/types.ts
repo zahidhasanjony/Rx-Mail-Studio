@@ -30,6 +30,8 @@ export interface Dataset {
   includedGenerics?: string[];
   availableGenerics?: string[];
   therapeuticGroups?: Record<string, string>;
+  preparationGroups?: Record<string, string>;
+  classificationVersion?: number;
   importedAt: string;
   active: boolean;
   rows: number;

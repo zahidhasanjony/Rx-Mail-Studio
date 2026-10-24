@@ -11,12 +11,12 @@ import { importFactBatches } from "./import-staging";
 import type { DashboardRow } from './dashboard-model';
 export async function cloudDashboard(from: string, to: string, signal: AbortSignal): Promise<DashboardRow[]> {
   if (!supabase) throw new Error('Cloud connection missing');
-  const result = await supabase.rpc('rxm_dashboard', { from_month: from, to_month: to }).abortSignal(signal);
+  const result = await supabase.rpc('rxm_dashboard_preparations', { from_month: from, to_month: to }).abortSignal(signal);
   if (result.error) throw new Error(result.error.message);
-  return (result.data as [string, string, string, string, number][] || []).map(([tg, generic, brand, company, count]) => {
+  return (result.data as [string, string, string, string, number, string][] || []).map(([tg, generic, brand, company, count, form]) => {
     const rx = Number(count);
     if (!Number.isSafeInteger(rx) || rx < 0) throw new Error('The dashboard returned an invalid Rx count.');
-    return { tg, generic, brand, company, rx };
+    return { tg, generic, brand, company, rx, form };
   });
 }
 export async function cloudDashboardTGs(signal: AbortSignal): Promise<string[]> {
@@ -25,9 +25,9 @@ export async function cloudDashboardTGs(signal: AbortSignal): Promise<string[]> 
   if (result.error) throw new Error(result.error.message);
   return result.data as string[] || [];
 }
-export async function assignCloudDashboardTG(generic: string, brand: string, companies: string[], tg: string): Promise<void> {
+export async function assignCloudDashboardTG(generic: string, brand: string, companies: string[], forms: string[], tg: string): Promise<void> {
   if (!supabase) throw new Error('Cloud connection missing');
-  const result = await supabase.rpc('rxm_assign_dashboard_tg', { generic_name: generic, brand_name: brand, company_names: companies, target_tg: tg });
+  const result = await supabase.rpc('rxm_assign_preparation_tg', { generic_name: generic, brand_name: brand, company_names: companies, dosage_forms: forms, target_tg: tg });
   if (result.error) throw new Error(result.error.message);
 }
 export const cloudConfigured = Boolean(

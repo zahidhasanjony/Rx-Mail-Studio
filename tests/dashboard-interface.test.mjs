@@ -42,7 +42,7 @@ test('mobile dashboard switches between single month and range, opens TG brands 
     assert.ok(w.document.querySelector('.rx-brand-row').textContent.includes('TOFEN'));
     assert.equal(w.document.querySelector('.rx-brand-row .rx-company').textContent,'(BEXIMCO)');
     const selectedPeriod=w.document.querySelector('.rx-period-bottom').textContent;
-    w.document.querySelector('[aria-label="View competitors for TOFEN (Ketotifen)"]').click();
+    w.document.querySelector('[aria-label="View competitors for TOFEN (Ketotifen · Syrup)"]').click();
     await waitFor(()=>w.document.querySelectorAll('.rx-competitor-row').length===6);
     assert.equal(w.document.querySelector('.rx-page-title h1').textContent,'Competitor Rx share');
     assert.equal(w.document.activeElement,w.document.querySelector('.rx-page-title h1'),'Page navigation moves keyboard focus to the title');

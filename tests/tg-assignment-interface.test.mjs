@@ -32,21 +32,21 @@ test('an unclassified brand can select a TG, retry a failed save, and retain its
     await ui.wait(() => ui.w.document.querySelector('[aria-label="View Unclassified brands"]'));
     const overallBefore = [...ui.w.document.querySelectorAll('.rx-kpi>strong')].slice(0, 3).map(e => e.title || e.textContent);
     ui.w.document.querySelector('[aria-label="View Unclassified brands"]').click();
-    await ui.wait(() => ui.w.document.querySelector('[aria-label="Select TG for BILLI (Bilastine)"]'));
-    const select = ui.w.document.querySelector('[aria-label="Select TG for BILLI (Bilastine)"]');
+    await ui.wait(() => ui.w.document.querySelector('[aria-label="Select TG for BILLI (Bilastine · Syrup)"]'));
+    const select = ui.w.document.querySelector('[aria-label="Select TG for BILLI (Bilastine · Syrup)"]');
     select.value = 'ANTI-ALLERGY'; select.dispatchEvent(new ui.w.Event('change', { bubbles: true }));
-    await ui.wait(() => !ui.w.document.querySelector('[aria-label="Save TG for BILLI (Bilastine)"]').disabled);
+    await ui.wait(() => !ui.w.document.querySelector('[aria-label="Save TG for BILLI (Bilastine · Syrup)"]').disabled);
     // A storage failure must leave the brand unclassified and offer the same selection again.
     IDBDatabase.prototype.transaction = function(names, mode, options) { if (mode === 'readwrite') throw new Error('Device storage is full'); return originalTransaction.call(this, names, mode, options); };
-    ui.w.document.querySelector('[aria-label="Save TG for BILLI (Bilastine)"]').click();
+    ui.w.document.querySelector('[aria-label="Save TG for BILLI (Bilastine · Syrup)"]').click();
     await ui.wait(() => ui.w.document.querySelector('.rx-assignment-error'));
     assert.match(ui.w.document.querySelector('.rx-assignment-error').textContent, /storage is full/);
-    assert.equal(ui.w.document.querySelector('[aria-label="Select TG for BILLI (Bilastine)"]').value, 'ANTI-ALLERGY');
+    assert.equal(ui.w.document.querySelector('[aria-label="Select TG for BILLI (Bilastine · Syrup)"]').value, 'ANTI-ALLERGY');
     assert.ok(ui.w.document.querySelector('.rx-brand-row').textContent.includes('BILLI'));
     IDBDatabase.prototype.transaction = originalTransaction;
-    ui.w.document.querySelector('[aria-label="Save TG for BILLI (Bilastine)"]').click();
+    ui.w.document.querySelector('[aria-label="Save TG for BILLI (Bilastine · Syrup)"]').click();
     await ui.wait(() => ui.w.document.body.textContent.includes('BILLI assigned to ANTI-ALLERGY.'));
-    assert.ok(!ui.w.document.querySelector('[aria-label="Save TG for BILLI (Bilastine)"]'));
+    assert.ok(!ui.w.document.querySelector('[aria-label="Save TG for BILLI (Bilastine · Syrup)"]'));
     ui.w.document.querySelector('[aria-label="Back to all therapeutic groups"]').click();
     await ui.wait(() => ui.w.document.querySelector('[aria-label="View Anti-Allergy brands"]'));
     assert.deepEqual([...ui.w.document.querySelectorAll('.rx-kpi>strong')].slice(0, 3).map(e => e.title || e.textContent), overallBefore, 'Reclassification preserves every overall count and share');

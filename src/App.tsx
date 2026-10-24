@@ -1014,7 +1014,7 @@ export default function App() {
         await crypto.subtle.digest(
           "SHA-256",
           new TextEncoder().encode(
-            sourceHash + JSON.stringify([pendingSource.sheets, scope]),
+            sourceHash + JSON.stringify([pendingSource.sheets, scope, pendingSource.classificationVersion || 1]),
           ),
         ),
       ),

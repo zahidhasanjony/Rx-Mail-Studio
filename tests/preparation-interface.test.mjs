@@ -1,0 +1,52 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { webcrypto } from 'node:crypto';
+import { JSDOM } from 'jsdom';
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
+import { demoWorkspace } from '../src/demo.ts';
+import { preparationKey } from '../src/preparations.ts';
+
+test('compiled dashboard assigns only the eye preparation and compares its own route without changing oral TGs or overall Rx', async () => {
+  const indexedDB=new IDBFactory(),workspace=demoWorkspace(),source=workspace.datasets[0],fact=source.facts[0];
+  source.facts.push({...fact,form:'TAB',count:20},{...fact,form:'EYE DROP',count:10},{...fact,brand:'OTHER EYE',company:'OTHER',form:'EYE DROP',count:30});
+  source.classificationVersion=2;
+  source.preparationGroups=Object.fromEntries(source.facts.map(f=>[preparationKey(f.generic,f.brand,f.company,f.form),f.form==='EYE DROP'?(f.brand==='TOFEN'?'':'OPHTHALMIC'):'ANTI-ALLERGY']));
+  const db=await new Promise(resolve=>{const r=indexedDB.open('rx-mail-studio',1);r.onupgradeneeded=()=>r.result.createObjectStore('workspace');r.onsuccess=()=>resolve(r.result);});
+  await new Promise(resolve=>{const tx=db.transaction('workspace','readwrite');tx.objectStore('workspace').put(workspace,'main');tx.oncomplete=resolve;});db.close();
+  const html=await readFile(new URL('../dist/index.html',import.meta.url),'utf8'),asset=html.match(/src="(\/assets\/index-[^"]+\.js)"/)[1];
+  const code=await readFile(new URL('../dist'+asset,import.meta.url),'utf8');
+  const dom=new JSDOM('<div id="root"></div>',{url:'https://rx-mail-studio.test/?view=dashboard',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window,errors=[];
+  w.addEventListener('error',e=>errors.push(e.message));
+  Object.defineProperty(w,'crypto',{value:webcrypto});Object.defineProperty(w,'indexedDB',{value:indexedDB});Object.defineProperty(w,'IDBKeyRange',{value:IDBKeyRange});Object.assign(w,{structuredClone,TextEncoder,TextDecoder,Blob});
+  const wait=async check=>{for(let i=0;i<200;i++){if(check())return;await new Promise(r=>setTimeout(r,15));}assert.fail(w.document.body.textContent.slice(-2000)+errors.join(';'));};
+  const byLabel=label=>w.document.querySelector(`[aria-label="${label}"]`);
+  try {
+    w.eval(code.replaceAll('import.meta.url','"https://rx-mail-studio.test/"'));
+    await wait(()=>byLabel('View Unclassified brands'));
+    const total=w.document.querySelectorAll('.rx-kpi>strong')[2].title;
+    byLabel('View Unclassified brands').click();
+    await wait(()=>byLabel('Select TG for TOFEN (Ketotifen · Eye Drop)'));
+    const select=byLabel('Select TG for TOFEN (Ketotifen · Eye Drop)');select.value='OPHTHALMIC';select.dispatchEvent(new w.Event('change',{bubbles:true}));
+    await wait(()=>!byLabel('Save TG for TOFEN (Ketotifen · Eye Drop)').disabled);
+    byLabel('Save TG for TOFEN (Ketotifen · Eye Drop)').click();
+    await wait(()=>w.document.body.textContent.includes('TOFEN assigned to OPHTHALMIC.'));
+    byLabel('Back to all therapeutic groups').click();await wait(()=>byLabel('View Anti-Allergy brands'));
+    assert.equal(w.document.querySelectorAll('.rx-kpi>strong')[2].title,total);
+    byLabel('View Anti-Allergy brands').click();await wait(()=>byLabel('View competitors for TOFEN (Ketotifen · Tablet + Syrup)'));
+    assert.equal(w.document.querySelectorAll('.rx-brand-row').length,1);
+    byLabel('View competitors for TOFEN (Ketotifen · Tablet + Syrup)').click();await wait(()=>w.document.querySelector('.rx-competitor-page'));
+    assert.equal(w.document.querySelectorAll('.rx-market-kpis .rx-kpi>strong')[1].title,'590');
+    assert.equal(w.document.querySelectorAll('.rx-market-kpis .rx-kpi>strong')[2].title,'2,570');
+    assert.ok(!w.document.querySelector('.rx-competitor-list').textContent.includes('OTHER EYE'));
+    byLabel('Back to TG brands').click();await wait(()=>byLabel('Back to all therapeutic groups'));
+    byLabel('Back to all therapeutic groups').click();await wait(()=>byLabel('View Ophthalmic brands'));
+    byLabel('View Ophthalmic brands').click();await wait(()=>byLabel('View competitors for TOFEN (Ketotifen · Eye Drop)'));
+    byLabel('View competitors for TOFEN (Ketotifen · Eye Drop)').click();await wait(()=>w.document.querySelectorAll('.rx-competitor-row').length===2);
+    assert.equal(w.document.querySelectorAll('.rx-market-kpis .rx-kpi>strong')[0].textContent,'25.0%');
+    assert.equal(w.document.querySelectorAll('.rx-market-kpis .rx-kpi>strong')[2].title,'40');
+    assert.ok(w.document.querySelector('.rx-competitor-list').textContent.includes('OTHER EYE'));
+    assert.ok(!w.document.querySelector('.rx-competitor-list').textContent.includes('FENAT'));
+    assert.deepEqual(errors,[]);
+  } finally {w.close();}
+});

@@ -5,8 +5,9 @@ import { cloudDashboard, cloudDashboardTGs, assignCloudDashboardTG, localDashboa
 import { coverage, eligibleDatasets, normalize } from './engine';
 import { isBeximcoCompany } from './catalogue';
 import { reportingMonths, reportingPeriod } from './reporting';
-import { dashboardData, mappedDashboardRows, therapeuticGroupKey, type DashboardRow } from './dashboard-model';
+import { dashboardData, mappedDashboardRows, type DashboardRow } from './dashboard-model';
 import { RxDashboardView } from './components/generated/RxDashboardTGToBrand';
+import { preparationKey, normalizePreparation } from './preparations';
 
 export default function DashboardPage({ datasets, mode, canEdit }: { datasets: Dataset[]; mode: Mode; canEdit: boolean }) {
   const months = useMemo(() => [...new Set(datasets.filter(d => d.active).flatMap(d => reportingMonths(d.from.slice(0, 7), d.to.slice(0, 7))))].sort(), [datasets]);
@@ -57,26 +58,27 @@ export default function DashboardPage({ datasets, mode, canEdit }: { datasets: D
   }, [datasets, from, to]);
   const local = useMemo<{ rows: DashboardRow[]; error?: string }>(() => {
     if (mode === 'cloud') return { rows: [] as DashboardRow[] };
-    try { const data = dashboardData(datasets, from, to); return { rows: mappedDashboardRows(data.rows, mappings) }; } catch (e) { return { rows: [] as DashboardRow[], error: (e as Error).message }; }
+    try { const data = dashboardData(datasets, from, to); return { rows: mappedDashboardRows(data.rows, mappings, datasets) }; } catch (e) { return { rows: [] as DashboardRow[], error: (e as Error).message }; }
   }, [datasets, mode, from, to, mappings]);
   const current = remote.key === requestKey, rows = mode === 'cloud' ? current ? remote.rows : [] : local.rows;
   const error = mode === 'cloud' ? current ? remote.error : undefined : mappingError || local.error;
-  const tgOptions = [...new Set([...cloudTGs, ...rows.map(r => r.tg), ...datasets.flatMap(d => Object.values(d.therapeuticGroups || {}))]
+  const tgOptions = [...new Set([...cloudTGs, ...rows.map(r => r.tg), ...datasets.flatMap(d => [...Object.values(d.therapeuticGroups || {}), ...Object.values(d.preparationGroups || {})])]
     .map(normalize).filter(tg => tg && tg !== 'UNCLASSIFIED'))].sort();
-  async function assignTG(brand: string, generic: string, tg: string) {
+  async function assignTG(brand: string, generic: string, forms: string[], tg: string) {
     if (!canEdit) throw new Error('TG editing requires Admin or Editor access.');
     if (!tgOptions.includes(tg)) throw new Error('Select a TG from the list.');
-    const companies = [...new Set(rows.filter(r => normalize(r.brand) === normalize(brand) && normalize(r.generic) === normalize(generic) && isBeximcoCompany(r.company)).map(r => normalize(r.company)))];
+    const companies = [...new Set(rows.filter(r => normalize(r.brand) === normalize(brand) && normalize(r.generic) === normalize(generic) && forms.includes(normalizePreparation(r.form || '')) && isBeximcoCompany(r.company)).map(r => normalize(r.company)))];
     if (!companies.length) throw new Error('This brand is no longer available. Refresh the dashboard.');
-    const keys = companies.map(company => therapeuticGroupKey(generic, brand, company));
+    const keys = companies.flatMap(company => forms.map(form => preparationKey(generic, brand, company, form)));
     if (mode === 'cloud') {
-      await assignCloudDashboardTG(generic, brand, companies, tg);
+      await assignCloudDashboardTG(generic, brand, companies, forms, tg);
       cache.current.clear(); setRetry(n => n + 1);
     } else if (mode === 'local') setMappings(await assignLocalDashboardTG(keys, tg));
     else setMappings(previous => ({ ...previous, ...Object.fromEntries(keys.map(key => [key, tg])) }));
     setSavedNotice(`${brand} assigned to ${tg}.${mode === 'demo' ? ' This is a sample-only change.' : ''}`);
   }
   const notices = [];
+  if (mode !== 'demo' && eligibleDatasets(datasets, from, to).some(source => source.classificationVersion !== 2)) notices.push('Re-upload older source files to refresh preparation-specific TG classification.');
   if (savedNotice) notices.push(savedNotice);
   if (metadata.missing.length) notices.push(`No active source for ${metadata.missing.map(m => reportingPeriod(m)).join(', ')}. Totals include the available months only.`);
   if (metadata.limited) notices.push('Some sources contain selected generics only. These shares cover the imported markets.');

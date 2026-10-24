@@ -142,3 +142,20 @@ test("quarterly hierarchy mapping is explicit and validates territory structure"
     /Invalid structure/,
   );
 });
+
+test('source import retains form-specific TGs and leaves conflicting same-form classifications unresolved', async () => {
+  const { preparationKey } = await import('../src/preparations');
+  const archive=unzipSync(new Uint8Array(await workbook().arrayBuffer()));
+  const headers=['Prescription Date','Generic Name','Brand Name','Company Name','Dosage Description','Dr Code','Dr Name/Institute Name','Doc Specialty','ACD RSE','ACD MPE','CCD. RSE Code','CCD. MPE Code','TG_l(All)'];
+  const records=[['TAB','ALLERGIC DISORDER'],['SYP','ALLERGIC DISORDER'],['EYE DROP','OPHTHALMIC'],['DROP','ALLERGIC DISORDER'],['DROP','OPHTHALMIC'],['DROP','OPHTHALMIC']];
+  const row=(r:number,values:string[])=>`<row r="${r}">${values.map((value,i)=>`<c r="${String.fromCharCode(65+i)}${r}" t="inlineStr"><is><t>${escape(value)}</t></is></c>`).join('')}</row>`;
+  archive['xl/worksheets/sheet1.xml']=xml(`<worksheet><sheetData>${row(1,headers)}${records.map(([form,tg],i)=>row(i+2,['46188','Ketotifen','TOFEN','BEXIMCO',form,'D'+i,'Doctor '+i,'Medicine','D5','D501','D6','D601',tg])).join('')}</sheetData></worksheet>`);
+  const file=new File([zipSync(archive) as unknown as BlobPart],'preparations.xlsx');
+  const imported=await importRx(file,await inspectWorkbook(file));
+  assert.equal(imported.classificationVersion,2);
+  assert.equal(imported.preparationGroups![preparationKey('Ketotifen','TOFEN','BEXIMCO','TAB')],'ALLERGIC DISORDER');
+  assert.equal(imported.preparationGroups![preparationKey('Ketotifen','TOFEN','BEXIMCO','SYP')],'ALLERGIC DISORDER');
+  assert.equal(imported.preparationGroups![preparationKey('Ketotifen','TOFEN','BEXIMCO','EYE DROP')],'OPHTHALMIC');
+  assert.equal(imported.preparationGroups![preparationKey('Ketotifen','TOFEN','BEXIMCO','DROP')],'','A repeated later TG does not erase a conflict');
+  assert.equal(imported.facts.reduce((n,f)=>n+f.count,0),6);
+});
