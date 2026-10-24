@@ -90,6 +90,7 @@ import {
 import type { Mode } from "./storage";
 import { usernameSignIn, currentAccount, AccountServiceError } from "./auth";
 import LoginPage from "./LoginPage";
+import PageReview from "./PageReview";
 import BatchHistory from "./BatchHistory";
 import { storageValue, savedUsername, rememberUsername, saveBrowserPassword, withDeadline } from "./startup";
 import type { UserAccount } from "./auth";
@@ -125,7 +126,7 @@ const nav = [
   { id: "brands", label: "Brand library", icon: FlaskConical },
   { id: "history", label: "Batch history", icon: History },
   { id: "settings", label: "Settings", icon: SettingsIcon },
-  { id: "users", label: "Users", icon: Users },
+  { id: "users", label: "Admin panel", icon: ShieldCheck },
 ] as const;
 const formatDate = (s: string) =>
   new Date(s + "T00:00:00Z").toLocaleDateString("en-GB", {
@@ -534,6 +535,20 @@ export default function App() {
   useEffect(() => setEmailTemplate(emailTemplateFor(workspace.settings)), [workspace.settings.emailTemplate]);
   const wordingError = templateError(emailTemplate);
   const isAdmin = mode === "cloud" && account?.role === "owner";
+  const [reviewPreference, setReviewPreference] = useState<{ ownerId: string; enabled: boolean } | null>(null);
+  const reviewEnabled = !!(isAdmin && account?.active && reviewPreference?.ownerId === account.id && reviewPreference.enabled);
+  useEffect(() => {
+    if (!isAdmin || !account?.active) { setReviewPreference(null); return; }
+    setReviewPreference({ ownerId: account.id, enabled: storageValue(`rxm-page-review-enabled-v1:${account.id}`) === "true" });
+  }, [isAdmin, account?.id, account?.active]);
+  function togglePageReview() {
+    if (!isAdmin || !account?.active) return;
+    const enabled = !reviewEnabled;
+    setReviewPreference({ ownerId: account.id, enabled });
+    try { localStorage.setItem(`rxm-page-review-enabled-v1:${account.id}`, String(enabled)); }
+    catch { notify("The selection setting applies for this session. Browser storage is unavailable.", true); }
+  }
+
   const [deleteSource, setDeleteSource] = useState<Dataset | null>(null);
   const [publishDefault, setPublishDefault] = useState(false);
   const selectedMonths = reportingMonths(month, endMonth);
@@ -1217,6 +1232,7 @@ export default function App() {
     onRemember={value => { setRemember(value); if (!value) rememberUsername("", false); }} onLogin={() => void loginSubmit()} onLocal={() => void switchLocal()} onContinue={() => void openCloud()}/>;
   return (
     <div className={`app-shell ${page === 'dashboard' ? 'dashboard-active' : ''}`}>
+      {reviewEnabled && <PageReview key={account!.id} />}
       <aside className={`sidebar ${mobileNav ? "mobile-open" : ""}`}>
         <a
           className="brand"
@@ -1350,7 +1366,7 @@ export default function App() {
                     brands: "Brand library",
                     history: "Batch history",
                     settings: "Workspace settings",
-                    users: "User management",
+                    users: "Admin panel",
                   }[page]
                 }
               </h1>
@@ -2369,7 +2385,16 @@ export default function App() {
               </div>
             </div>
           )}
-          {page === "users" && mode === "cloud" && account?.role === "owner" && <UsersPage admin={account} notify={notify} onAccountChange={setAccount} />}
+          {page === "users" && isAdmin && account?.active && <>
+            <section className="card admin-page-selection" data-review-ui aria-labelledby="page-selection-title">
+              <h2 id="page-selection-title">Page selection</h2>
+              <p id="page-selection-description">Show Select changes for your admin account on this device. Regular users never see it.</p>
+              <button type="button" className="button secondary" role="switch" aria-label="Enable page selection" aria-describedby="page-selection-description" aria-checked={reviewEnabled} onClick={togglePageReview}>
+                {reviewEnabled ? "Deactivate" : "Activate"} Select changes
+              </button>
+            </section>
+            <UsersPage admin={account} notify={notify} onAccountChange={setAccount} />
+          </>}
         </main>
         <nav className="mobile-bottom">
           {nav

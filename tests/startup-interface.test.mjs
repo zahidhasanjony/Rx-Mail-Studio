@@ -19,6 +19,7 @@ test('login appears without reading blocked device memory and offers a recoverab
     await wait(() => w.document.querySelector('.login-device'));
     for (const removed of ['Your Rx workspace', 'Sign in to access your cloud data', 'Your browser saves the password', 'Open cloud workspace', 'Having trouble opening the app?', 'Device data stays in this browser.']) assert.ok(!w.document.body.textContent.includes(removed), removed + ' removed');
     assert.equal(reads, 0, 'The login page must appear without loading a potentially large saved workspace');
+    assert.ok(!w.document.querySelector('.page-review'), 'Page selection is hidden before admin sign-in');
     assert.ok(!w.document.querySelector('.sidebar'));
     w.document.querySelector('.login-device').click();
     await wait(() => w.document.querySelector('.login-error'));

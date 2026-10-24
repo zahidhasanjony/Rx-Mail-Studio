@@ -32,6 +32,9 @@ test("compiled login restores the cloud indicator, preserves admin page access a
       const account = { id: "11111111-1111-4111-8111-111111111111", username: role === "owner" ? "ZHD" : "TEAM", name: "Test account", role: role === "stale" ? "member" : role, active: true, createdAt: "2026-01-01" };
       const jwt = [Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url"), Buffer.from(JSON.stringify({ sub: account.id, email: "owner@example.com", exp: Math.floor(Date.now()/1000)+3600, role: "authenticated" })).toString("base64url"), Buffer.alloc(32, 1).toString("base64url")].join(".");
       const accounts = [account];
+      const selectionKey = `rxm-page-review-enabled-v1:${account.id}`;
+      if (role !== "owner" || scenario === "restored-owner") w.localStorage.setItem(selectionKey, "true");
+
       const sample = demoWorkspace();
       const frozenBatch = { id: "55555555-5555-4555-8555-555555555555", createdAt: "2026-06-20T10:00:00Z", month: "2026-06", brand: "TOFEN", generic: "Ketotifen", period: "all", sourceIds: [], hierarchyId: "h", settings: sample.settings, profile: sample.profiles[0], mails: [{ id: "mail-one", region: "D5", structure: "ACD", to: { name: "Test RSE", email: "test@example.com" }, cc: [], subject: "Frozen subject", html: "<p>Frozen original email</p>", doctorCount: 1, rxCount: 2, status: "Prepared" }] };
       let historyAvailable = false;
@@ -110,6 +113,7 @@ test("compiled login restores the cloud indicator, preserves admin page access a
       try {
         w.eval(code.replaceAll("import.meta.url", '"https://rxmail.vercel.app/"'));
         await waitFor(() => w.document.querySelector('[aria-label="Username"]'));
+        assert.ok(!w.document.querySelector(".page-review"), "Login never shows the selection tool");
         assert.equal(requests.length, 0, "The login page does not download cloud data before a mode is chosen");
         assert.equal(calls.length, 0, "Saved sessions do not delay or bypass the login page");
         if (role === "stale") {
@@ -237,8 +241,21 @@ test("compiled login restores the cloud indicator, preserves admin page access a
           assert.ok(requests.some(r => r.method === "DELETE" && r.path.endsWith("rxm_datasets")));
         }
         if (role === "owner") {
-          await waitFor(() => button("Users")); button("Users").click();
+          await waitFor(() => button("Admin panel")); button("Admin panel").click();
           await waitFor(() => w.document.querySelector('.users-table tbody tr'));
+          const reviewSwitch = w.document.querySelector('[role="switch"][aria-label="Enable page selection"]');
+          assert.ok(reviewSwitch, "Only admin panel provides selection control");
+          assert.equal(reviewSwitch.getAttribute("aria-checked"), scenario === "restored-owner" ? "true" : "false");
+          assert.equal(!!w.document.querySelector(".page-review"), scenario === "restored-owner", "Admin preference restores; default is off");
+          if (scenario === "restored-owner") { reviewSwitch.click(); await waitFor(() => !w.document.querySelector(".page-review")); }
+          reviewSwitch.click(); await waitFor(() => w.document.querySelector(".page-review"));
+          assert.equal(w.localStorage.getItem(selectionKey), "true");
+          button("Select changes").click();
+          await waitFor(() => button("Done selecting"));
+          reviewSwitch.click(); await waitFor(() => !w.document.querySelector(".page-review"));
+          assert.equal(w.localStorage.getItem(selectionKey), "false", "Admin can deactivate even during selection");
+          reviewSwitch.click(); await waitFor(() => w.document.querySelector(".page-review"));
+
           const form = w.document.querySelector('.user-create form'), inputs = form.querySelectorAll('input');
           fill(inputs[0], "SBM01"); fill(inputs[1], "Test member"); fill(inputs[2], "newpass");
           form.dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
@@ -252,14 +269,17 @@ test("compiled login restores the cloud indicator, preserves admin page access a
           await waitFor(() => !w.document.querySelector('.user-editor'));
           assert.equal(calls.find((c) => c.action === "password").password, "replacement");
         } else {
-          assert.ok(!button("Users")); assert.ok(!button("Manage users"));
+          assert.ok(!button("Admin panel")); assert.ok(!button("Manage users"));
+          assert.ok(!w.document.querySelector(".page-review"), "Stored enabled flag cannot expose selection to non-admin roles");
+          assert.ok(!w.document.querySelector('[aria-label="Enable page selection"]'));
         }
         [...w.document.querySelectorAll("aside nav button")].find(b => b.textContent.trim().startsWith("Generate emails")).click();
         await waitFor(() => button("Sign out"));
         button("Sign out").click();
         await waitFor(() => button("Sign in") && !w.document.querySelector('.mode-pill[aria-label="Cloud connected"]'));
         assert.equal(w.localStorage.getItem("sb-rx-project-auth-token"), null);
-        assert.ok(!button("Admin controls")); assert.ok(!button("Users"));
+        assert.ok(!w.document.querySelector(".page-review"), "Sign-out removes admin selection immediately");
+        assert.ok(!button("Admin controls")); assert.ok(!button("Admin panel"));
         await waitFor(() => w.document.querySelector('.login-device'));
         w.document.querySelector('.login-device').click();
         await waitFor(() => button("Source files")); button("Source files").click();
