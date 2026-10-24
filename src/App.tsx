@@ -49,9 +49,11 @@ import type {
 } from "./types";
 import { emptyWorkspace, starterProfiles } from "./types";
 import { clearStagedImport, clearRawStaging } from "./import-staging";
-import { loadUploadJobs, saveUploadJob, type UploadJob, type UploadManifest, type UploadProgress } from "./upload";
+import { loadUploadJobs, saveUploadJobs, type UploadJob, type UploadManifest, type UploadProgress } from "./upload";
 import { pendingCloudImports, discardCloudImport, uploadCloudSource } from "./cloud-upload";
 import { UploadPanel } from "./UploadPanel";
+import SourceImportFlow, { type SourceImportControl } from "./SourceImportFlow";
+import { planSourceImports } from "./import-flow";
 import {
   workspaceToday,
   coverage,
@@ -497,21 +499,14 @@ export default function App() {
     [username, setUsername] = useState(""),
     [password, setPassword] = useState(""),
     [account, setAccount] = useState<UserAccount | null>(null);
-  const [sourcePicker, setSourcePicker] = useState<{
-      file: File;
-      sheets: Sheet[];
-      selected: string[];
-    } | null>(null),
-    [pendingSource, setPendingSource] = useState<Dataset | null>(null);
-  const pendingImport = useRef<{ file: File; sheets: Sheet[] } | null>(null);
-  const pendingStaged = useRef<Dataset | null>(null);
+  const sourceFlow = useRef<SourceImportControl | null>(null);
+  const [sourceFlowBusy, setSourceFlowBusy] = useState(false);
   const [uploadJob, setUploadJob] = useState<UploadJob | null>(null);
   const [uploadView, setUploadView] = useState<UploadProgress | null>(null);
   const [unfinishedImports, setUnfinishedImports] = useState<{ id: string; name: string; imported_at: string }[]>([]);
   const uploadControl = useRef<AbortController | null>(null);
   const sourcePreparing = useRef(false);
   const importRunning = !!uploadView && ["preparing", "uploading", "verifying"].includes(uploadView.phase);
-  const [importMarkets, setImportMarkets] = useState<Set<string>>(new Set());
   const [hierarchyMap, setHierarchyMap] = useState<{
       name: string;
       rows: string[][];
@@ -876,10 +871,10 @@ export default function App() {
   }
   async function selectFile(
     file: File | undefined,
-    kind: "source" | "hierarchy",
+    kind: "hierarchy",
   ) {
     if (!file) return;
-    if (sourcePreparing.current || (kind === "source" && (importRunning || uploadJob))) { notify("Finish or discard the current source import before starting another.", true); return; }
+    if (sourcePreparing.current || sourceFlowBusy || importRunning) { notify("Finish or discard the current source import before starting another.", true); return; }
     if (kind === "hierarchy" && !isAdmin) { notify("Only admins can upload or change the hierarchy.", true); return; }
     if (mode === "demo") {
       notify("Switch to your device workspace to import real data.", true);
@@ -898,15 +893,8 @@ export default function App() {
             "Please upload an .xlsx workbook. Hierarchy also accepts CSV.",
           );
         const sheets = await runWorker<Sheet[]>(file, "inspect");
-        if (kind === "source") {
-          const main = sheets.find((s) => /^TRD\b/i.test(s.name)) || sheets[0];
-          setSourcePicker({ file, sheets, selected: [main.path] });
-        } else {
-          const rows = await runWorker<string[][]>(file, "hierarchy", [
-            sheets[0],
-          ]);
-          prepareHierarchyMapping(file.name, rows);
-        }
+        const rows = await runWorker<string[][]>(file, "hierarchy", [sheets[0]]);
+        prepareHierarchyMapping(file.name, rows);
       }
     } catch (e) {
       notify((e as Error).message, true);
@@ -934,47 +922,10 @@ export default function App() {
     });
     setHierarchyName(name.replace(/\.(xlsx|csv)$/i, ""));
   }
-  async function processSource() {
-    if (!sourcePicker) return;
-    if (mode !== "cloud") setBusy(true);
-    sourcePreparing.current = mode === "cloud";
-    if (sourcePreparing.current) setUploadView({ phase: "preparing", saved: 0, total: 0, percent: 0 });
-    setBusyText("Preparing import");
-    setProgress(0);
-    const choice = sourcePicker;
-    setSourcePicker(null);
-    try {
-      const chosenSheets = choice.sheets.filter((s) =>
-        choice.selected.includes(s.path),
-      );
-      pendingImport.current = { file: choice.file, sheets: chosenSheets };
-      const d = await runWorker<Dataset>(
-        choice.file,
-        mode === "cloud" ? "source-staged" : "source",
-        chosenSheets,
-        mode === "cloud" ? undefined : [],
-      );
-      if (d.invalidRows)
-        throw new Error(
-          `${num(d.invalidRows)} rows have missing doctor codes, generic names or invalid dates. Correct these rows and re-upload to keep the Rx totals accurate.`,
-        );
-      const available = datasetGenericNames(d);
-      setImportMarkets(new Set(mode === "cloud" ? available :
-        [...new Set([...starterProfiles.map(p => p.generic), ...workspace.datasets.flatMap(ds => ds.includedGenerics || [])])]
-          .filter(g => available.some(name => normalize(name) === normalize(g)))));
-      setPendingSource(d);
-      if (d.stagedImportId) pendingStaged.current = d;
-    } catch (e) {
-      notify((e as Error).message, true);
-    } finally {
-      sourcePreparing.current = false;
-      if (mode === "cloud") setUploadView(null);
-      setBusy(false);
-    }
-  }
   async function resumeSourceUpload(job: UploadJob) {
     if (uploadControl.current) return;
     const controller = new AbortController(); uploadControl.current = controller;
+    let nextJob: UploadJob | undefined;
     setUploadJob(job);
     setUploadView({ phase: "uploading", saved: 0, total: job.manifest.records, percent: 0 });
     try {
@@ -984,12 +935,14 @@ export default function App() {
       await clearStagedImport(job.id).catch(() => {});
       setUnfinishedImports(rows => rows.filter(row => row.id !== job.source.id));
       setUploadJob(null); setMonth(job.source.to.slice(0, 7)); setEndMonth(job.source.to.slice(0, 7));
-      notify("Source import verified and activated.");
+      nextJob = (await loadUploadJobs(job.ownerId))[0];
+      notify(nextJob ? "File verified. Continuing the import queue." : "Import complete. Dashboard and mail analysis are updated.");
     } catch (error) {
       const paused = controller.signal.aborted;
       setUploadView(p => ({ phase: paused ? "paused" : "failed", saved: p?.saved || 0, total: job.manifest.records, percent: p?.percent || 0, message: paused ? undefined : (error as Error).message }));
       void pendingCloudImports().then(setUnfinishedImports).catch(() => {});
     } finally { uploadControl.current = null; }
+    if (nextJob) void resumeSourceUpload(nextJob);
   }
   async function discardSourceUpload(id: string, localJob?: UploadJob) {
     if (importRunning || !window.confirm("Discard this unfinished upload? Completed sources and saved emails will be kept.")) return;
@@ -997,126 +950,52 @@ export default function App() {
       await discardCloudImport(id);
       if (localJob) await clearStagedImport(localJob.id);
       setUnfinishedImports(rows => rows.filter(row => row.id !== id));
-      if (uploadJob?.source.id === id) { setUploadJob(null); setUploadView(null); }
+      if (uploadJob?.source.id === id) {
+        const next = account ? (await loadUploadJobs(account.id))[0] : undefined;
+        setUploadJob(next || null);
+        setUploadView(next ? { phase: "paused", saved: 0, total: next.manifest.records, percent: -1, message: "Next file in the import queue. Resume when ready." } : null);
+      }
       notify("Unfinished upload discarded. You can upload the original file again.");
     } catch (error) { notify((error as Error).message, true); }
   }
-  async function commitSource(replace: boolean) {
-    if (!pendingSource) return;
-    if (!importMarkets.size) {
-      notify("Select at least one generic market to retain.", true);
-      return;
-    }
-    const scope = [...importMarkets].sort();
-    const sourceHash = pendingSource.hash;
-    const scopeDigest = Array.from(
-      new Uint8Array(
-        await crypto.subtle.digest(
-          "SHA-256",
-          new TextEncoder().encode(
-            sourceHash + JSON.stringify([pendingSource.sheets, scope, pendingSource.classificationVersion || 1]),
-          ),
-        ),
-      ),
-    )
-      .map((x) => x.toString(16).padStart(2, "0"))
-      .join("");
-    const existingSource = workspace.datasets.find(d => d.hash === scopeDigest);
-    if (existingSource) {
-      if (!existingSource.aseByMpe && pendingSource.aseByMpe && Object.values(pendingSource.aseByMpe).some(values => Object.keys(values).length)) {
-        const recovered = { ...existingSource, aseByMpe: pendingSource.aseByMpe };
-        if (await update({ ...workspace, datasets: workspace.datasets.map(d => d.id === existingSource.id ? recovered : d) })) {
-          setPendingSource(null);
-          notify("ASE details recovered for the saved source.");
-        }
-        return;
-      }
-      notify(
-        "This file and market selection were already imported. Use its saved version in Source files.",
-        true,
-      );
-      return;
-    }
+  async function commitSources(sources: Dataset[]) {
+    if (!sources.length) return;
+    const decisions = planSourceImports(sources, workspaceRef.current.datasets);
+    const invalid = decisions.find(d => d.status !== "ready");
+    if (invalid) throw new Error(invalid.message);
     if (mode === "cloud") {
-      if (!account || !pendingSource.stagedImportId) { notify("Select the original workbook again to prepare this upload.", true); return; }
-      const source = { ...pendingSource, hash: scopeDigest, sourceHash, includedGenerics: scope, facts: [] };
+      if (!account) throw new Error("Sign in before importing.");
       sourcePreparing.current = true;
       setUploadView({ phase: "preparing", saved: 0, total: 0, percent: 0 });
-      setPendingSource(null);
+      const jobs: UploadJob[] = [];
+      const batchId = crypto.randomUUID();
       try {
-        const manifest = await runWorker<UploadManifest>(undefined, "prepare-upload", undefined, undefined, source);
-        const job: UploadJob = { id: source.stagedImportId!, ownerId: account.id, source, manifest, createdAt: new Date().toISOString() };
-        await saveUploadJob(job);
-        await clearRawStaging(job.id).catch(() => {});
-        pendingImport.current = null; pendingStaged.current = null;
+        // Prepare every file before starting the cloud queue. Persist queue order
+        // so a reload can resume the remaining files after the current upload.
+        for (const [batchIndex, source] of sources.entries()) {
+          if (!source.stagedImportId) throw new Error("Select the original workbook again.");
+          const manifest = await runWorker<UploadManifest>(undefined, "prepare-upload", undefined, undefined, source);
+          jobs.push({ id: source.stagedImportId, ownerId: account.id, source, manifest, batchId, batchIndex, createdAt: new Date().toISOString() });
+        }
+        await saveUploadJobs(jobs);
+        for (const job of jobs) await clearRawStaging(job.id).catch(() => {});
         sourcePreparing.current = false;
-        void resumeSourceUpload(job);
+        void resumeSourceUpload(jobs[0]);
       } catch (error) {
-        setUploadView({ phase: "failed", saved: 0, total: 0, percent: 0, message: (error as Error).message });
-        setPendingSource(source); notify((error as Error).message, true);
+        // Saved parts remain available for retry; raw staging is retained until
+        // the complete queue has been persisted successfully.
+        setUploadView(null);
+        throw error;
       } finally { sourcePreparing.current = false; }
       return;
     }
-    let source = pendingStaged.current || pendingSource;
-    const preparedScope = new Set(source.includedGenerics?.map(normalize));
-    if (
-      scope.some(g => !preparedScope.has(normalize(g)))
-    ) {
-      if (!pendingImport.current) {
-        notify("Select the original workbook again to add markets.", true);
-        return;
-      }
-      setBusy(true);
-      setProgress(0);
-      try {
-        if (pendingStaged.current?.stagedImportId) {
-          await clearStagedImport(pendingStaged.current.stagedImportId);
-          pendingStaged.current = null;
-        }
-        source = await runWorker<Dataset>(
-          pendingImport.current.file,
-          "source",
-          pendingImport.current.sheets,
-          scope,
-        );
-        if (source.stagedImportId) pendingStaged.current = source;
-      } catch (e) {
-        notify((e as Error).message, true);
-        return;
-      } finally {
-        setBusy(false);
-      }
-    }
-    const retainedScope = new Set(scope.map(normalize));
-    const d = {
-      ...source,
-      sourceHash,
-      hash: scopeDigest,
-      includedGenerics: scope,
-      facts: source.facts.filter((f) => retainedScope.has(normalize(f.generic))),
-    };
-    const conflicts = workspace.datasets.filter(
-      (o) => o.active && overlaps(o, d),
-    );
-    if (conflicts.length && !replace) {
-      notify("This import overlaps active reporting dates.", true);
-      return;
-    }
-    const datasets = workspace.datasets.map((o) =>
-      conflicts.some((c) => c.id === o.id) ? { ...o, active: false } : o,
-    );
-    const profiles = appendBrandPairs(workspace.profiles, sourceBrandPairs([d]), workspace.deletedBrandPairs);
-    const next = { ...workspace, datasets: [...datasets, d], profiles };
-    if (await update(next)) {
-      setPendingSource(null);
-      pendingImport.current = null;
-      pendingStaged.current = null;
-      if (source.stagedImportId) await clearStagedImport(source.stagedImportId).catch(() => {});
-      setMonth(d.to.slice(0, 7));
-      setEndMonth(d.to.slice(0, 7));
-      setPage("generate");
-      notify(`${num(d.rows)} product occurrences imported`);
-    }
+    const current = workspaceRef.current;
+    const datasets = current.datasets.map(old => sources.some(source => old.active && overlaps(old, source)) ? { ...old, active: false } : old);
+    const profiles = appendBrandPairs(current.profiles, sourceBrandPairs(sources), current.deletedBrandPairs);
+    if (!await update({ ...current, datasets: [...datasets, ...sources], profiles })) throw new Error("The import could not be saved. Try again.");
+    const last = sources.reduce((a, b) => a.to > b.to ? a : b);
+    setMonth(last.to.slice(0, 7)); setEndMonth(last.to.slice(0, 7));
+    notify("Import complete. Dashboard and mail analysis are updated.");
   }
   async function saveHierarchy() {
     if (!isAdmin) { notify("Admin access required", true); return; }
@@ -1476,7 +1355,7 @@ export default function App() {
         </header>
         <main>
           {mode === "cloud" && uploadView && (!uploadJob || uploadJob.ownerId === account?.id) && <UploadPanel
-            name={uploadJob?.source.name || pendingImport.current?.file.name || "Source workbook"}
+            name={uploadJob?.source.name || "Source workbooks"}
             progress={uploadView}
             onPause={() => uploadControl.current?.abort()}
             onResume={uploadJob ? () => { void resumeSourceUpload(uploadJob); } : undefined}
@@ -1533,10 +1412,10 @@ export default function App() {
             {page === "sources" ? (
               <Button
                 onClick={() => sourceInput.current?.click()}
-                disabled={busy || importRunning || !!uploadJob}
+                disabled={busy || sourceFlowBusy || importRunning || !!uploadJob}
               >
                 <Plus size={17} />
-                Upload MRW file
+                Upload Rx files
               </Button>
             ) : page === "hierarchy" ? (
               <Button
@@ -1865,7 +1744,7 @@ export default function App() {
                       <div className="empty-actions">
                         <Button onClick={() => sourceInput.current?.click()}>
                           <UploadCloud size={16} />
-                          Upload MRW file
+                          Upload Rx files
                         </Button>
                         <Button
                           variant="secondary"
@@ -1915,13 +1794,13 @@ export default function App() {
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => {
                   e.preventDefault();
-                  void selectFile(e.dataTransfer.files[0], "source");
+                  sourceFlow.current?.selectFiles(Array.from(e.dataTransfer.files));
                 }}
               >
                 <div className="upload-symbol">
                   <FileSpreadsheet size={31} />
                 </div>
-                <h2>Drop .xlsx here</h2>
+                <h2>Drop Rx .xlsx files here</h2><p>Upload multiple files together. All generics are included.</p>
               </section>
               </div>
               <section className="card">
@@ -2651,7 +2530,9 @@ export default function App() {
         ref={sourceInput}
         type="file"
         accept=".xlsx"
-        onChange={(e) => selectFile(e.target.files?.[0], "source")}
+        multiple
+        aria-label="Upload Rx files"
+        onChange={(e) => { sourceFlow.current?.selectFiles(Array.from(e.target.files || [])); e.target.value = ""; }}
       />
       <input
         hidden
@@ -2727,161 +2608,9 @@ export default function App() {
           </div>
         </Modal>
       )}
-      {sourcePicker && (
-        <Modal
-          title="Choose your MRW source sheets"
-          onClose={() => setSourcePicker(null)}
-        >
-          <div className="modal-body">
-            <p className="muted">
-              {sourcePicker.file.name} ·{" "}
-              {(sourcePicker.file.size / 1048576).toFixed(1)} MB
-            </p>
-            <div className="notice">
-              <AlertCircle size={17} />
-              <span>
-                The main TRD sheet is selected. Include other sheets only when
-                they contain additional records, to prevent duplicate counts.
-              </span>
-            </div>
-            {sourcePicker.sheets.map((s) => (
-              <label className="sheet-choice" key={s.path}>
-                <input
-                  type="checkbox"
-                  checked={sourcePicker.selected.includes(s.path)}
-                  onChange={(e) =>
-                    setSourcePicker({
-                      ...sourcePicker,
-                      selected: e.target.checked
-                        ? [...sourcePicker.selected, s.path]
-                        : sourcePicker.selected.filter((p) => p !== s.path),
-                    })
-                  }
-                />
-                <FileSpreadsheet size={18} />
-                <span>{s.name}</span>
-              </label>
-            ))}
-          </div>
-          <div className="modal-footer">
-            <Button variant="secondary" onClick={() => setSourcePicker(null)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={!sourcePicker.selected.length}
-              onClick={processSource}
-            >
-              Process workbook
-              <ArrowRight size={16} />
-            </Button>
-          </div>
-        </Modal>
-      )}
-      {pendingSource && (
-        <Modal
-          title="Review your source import"
-          onClose={() => {
-            setPendingSource(null); pendingImport.current = null;
-            if (pendingStaged.current?.stagedImportId) void clearStagedImport(pendingStaged.current.stagedImportId).catch(() => {});
-            pendingStaged.current = null;
-          }}
-        >
-          <div className="modal-body">
-            <div className="success-symbol">
-              <CheckCircle2 size={28} />
-            </div>
-            <h3>{pendingSource.name}</h3>
-            <div className="review-stats">
-              <div>
-                <strong>{num(pendingSource.rows)}</strong>
-                <small>Recorded occurrences</small>
-              </div>
-              <div>
-                <strong>{pendingSource.catalog.length}</strong>
-                <small>Beximco brand pairs</small>
-              </div>
-            </div>
-            <p>
-              {formatDate(pendingSource.from)} — {formatDate(pendingSource.to)}
-            </p>
-            <p className="muted">
-              Raw Excel stays on your device. Select the generic markets to
-              retain. All competitor brands within those markets are included;
-              the full Beximco catalogue remains available.
-            </p>
-            <div className="scope-heading">
-              <strong>{importMarkets.size} markets selected</strong>
-              <button
-                className="text-link"
-                onClick={() =>
-                  setImportMarkets(
-                    new Set(datasetGenericNames(pendingSource)),
-                  )
-                }
-              >
-                Select all
-              </button>
-              <button
-                className="text-link"
-                onClick={() => setImportMarkets(new Set())}
-              >
-                Clear
-              </button>
-            </div>
-            <div className="scope-list">
-              {datasetGenericNames(pendingSource)
-                .sort()
-                .map((g) => (
-                  <label className="sheet-choice" key={g}>
-                    <input
-                      type="checkbox"
-                      checked={importMarkets.has(g)}
-                      onChange={(e) => {
-                        const next = new Set(importMarkets);
-                        e.target.checked ? next.add(g) : next.delete(g);
-                        setImportMarkets(next);
-                      }}
-                    />
-                    {g}
-                  </label>
-                ))}
-            </div>
-            <p className="tiny">
-              {mode === "cloud" ? "All generic markets are selected by default. Uncheck any you do not want to save." : "Select the markets to keep on this device, or use Select all."} A replacement import keeps the old version
-              active until the new data finishes saving.
-            </p>
-            {workspace.datasets.filter(
-              (d) => d.active && overlaps(d, pendingSource),
-            ).length > 0 && (
-              <div className="notice warning">
-                <AlertCircle size={18} />
-                <span>
-                  This overlaps{" "}
-                  {workspace.datasets
-                    .filter((d) => d.active && overlaps(d, pendingSource))
-                    .map((d) => d.name)
-                    .join(", ")}
-                  . Importing will archive those versions and use this file for
-                  those dates.
-                </span>
-              </div>
-            )}
-          </div>
-          <div className="modal-footer">
-            <Button variant="secondary" onClick={() => {
-              setPendingSource(null); pendingImport.current = null;
-              if (pendingStaged.current?.stagedImportId) void clearStagedImport(pendingStaged.current.stagedImportId).catch(() => {});
-              pendingStaged.current = null;
-            }}>
-              Cancel
-            </Button>
-            <Button onClick={() => commitSource(true)}>
-              Confirm import
-              <Check size={16} />
-            </Button>
-          </div>
-        </Modal>
-      )}
+      <SourceImportFlow control={sourceFlow} cloud={mode === "cloud"} demo={mode === "demo"}
+        disabled={busy || loading || importRunning || !!uploadJob} datasets={workspace.datasets}
+        progress={progress} progressText={busyText} runWorker={runWorker} onCommit={commitSources} onBusy={setSourceFlowBusy} notify={notify} />
       {deleteBrand && isAdmin && <Modal title="Delete brand pair?" onClose={() => !busy && setDeleteBrand(null)}>
         <div className="modal-body"><p>Delete <strong>{deleteBrand.brand} · {deleteBrand.generic}</strong> from the Brand Library?</p><p className="muted">Future imports will not add this pair again. Source data and saved email batches stay available.</p></div>
         <div className="modal-footer"><Button variant="secondary" disabled={busy} onClick={() => setDeleteBrand(null)}>Cancel</Button><Button variant="danger" disabled={busy} onClick={async () => {

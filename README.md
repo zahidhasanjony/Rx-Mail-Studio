@@ -22,7 +22,7 @@ Import this GitHub repository, choose Vite, use `npm ci` and `npm run build`, an
 
 ## App use
 
-Upload source spreadsheets and a recipient hierarchy through the interface. Review the imported columns, reporting period, market definition and recipients before generating a batch. Source files stay on the device; cloud storage holds aggregates and protected settings. Imported hierarchy revisions and generated batches retain their versions.
+Upload source spreadsheets and a recipient hierarchy through the interface. Review the imported columns, reporting period, market definition and recipients before generating a batch. Raw source files stay on the device; cloud storage holds aggregates and protected settings. Imported hierarchy revisions and generated batches retain their versions.
 
 The own-brand summary appears before the prescriber table, followed by up to four leading competitors. Counts use the selected market denominator. Doctor codes identify records. Missing routing or reporting coverage blocks the affected email.
 
@@ -117,7 +117,11 @@ Apply the `dashboard_summaries` migration after `resumable_source_upload`. Its t
 
 ## Mobile source imports and recovery
 
-Cloud imports scan prescription rows once, discovering all generic markets while staging facts in small batches in a worker. All markets are selected by default; the review can narrow them without parsing the workbook again. After confirmation the worker prepares byte-capped parts and a manifest. Only metadata crosses into React reporting state. Equivalent Rx rows may be aggregated in separate batches; all counts are summed by the report engine. Device-only imports retain their existing selected-market workflow.
+Source files accepts multiple workbooks through file selection or drag-and-drop. A unique TRD sheet (or the only worksheet) is selected automatically; ambiguous workbooks ask which complete source sheet to use. Dates come from the prescription records. Every generic and competitor brand is retained in both cloud and device workspaces, with no import market picker. Mail target-generic selection remains available for report composition.
+
+One batch review shows each file's dates, Rx count, generic count and exceptions, followed by **Import & Sync**. Invalid rows block the affected file until corrected or removed. Exact duplicates are skipped. A cumulative file supersedes a shorter file only when its date coverage and retained markets include the shorter file. Disjoint phases are both retained. Conflicting overlaps or replacements that would lose saved dates or markets are blocked. Cloud activation rechecks replacement coverage before archiving old sources.
+
+Cloud imports scan each workbook once and stage facts in small worker batches. After confirmation the worker prepares byte-capped parts and manifests. All jobs are persisted atomically with batch order before uploading begins. Verified files refresh dashboard and mail-analysis data, and the next file starts automatically. Pause, resume and page reopening retain the remaining queue; discarding the current file offers the next saved job. Only metadata crosses into React reporting state. Equivalent Rx rows may be aggregated in separate batches; all counts are summed by the report engine. Saved preparation-specific TG mappings and Unclassified assignment remain in effect.
 
 Upload requests combine small generic parts up to 512 KiB, with at most two requests in flight. Slow requests or transient failures reduce concurrency to one, with bounded exponential retry and request timeouts. Each part has a deterministic index and SHA-256 digest of all known prescription fields. Supabase derives actual record and Rx counts, validates each month/generic, and ignores identical retries. An activation trigger verifies every manifest part before the existing finish RPC atomically activates the source and archives overlaps.
 

@@ -2480,3 +2480,11 @@ textarea {
 .brand-library-search .search { flex:1; width:auto; }
 .brand-search-count { flex-basis:100%; margin:0; font-size:11px; }
 @media(max-width:600px) { .brand-library-toolbar { padding:16px; } .brand-library-search { min-width:0; flex-basis:100%; flex-wrap:wrap; } .brand-library-search .search { min-width:140px; } }
+
+.source-batch-list { display: grid; gap: 12px; }
+.source-batch-row { padding: 14px; border: 1px solid var(--border, #d1d5db); border-radius: 10px; display: grid; gap: 6px; overflow-wrap: anywhere; }
+.source-batch-row small { display: block; }
+.source-batch-row label { display: grid; gap: 6px; }
+.source-batch-row select { width: 100%; min-width: 0; }
+.source-batch-row p { margin: 4px 0; }
+.source-batch-row .text-link { justify-self: start; }

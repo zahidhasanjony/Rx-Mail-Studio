@@ -3,7 +3,7 @@ import { uploadDb, importFactBatches } from "./import-staging";
 
 export interface UploadPartMeta { part: number; generic: string; month: string; hash: string; records: number; rx: number; bytes: number }
 export interface UploadManifest { version: 1; records: number; rx: number; parts: UploadPartMeta[] }
-export interface UploadJob { id: string; ownerId: string; source: Dataset; manifest: UploadManifest; createdAt: string }
+export interface UploadJob { id: string; ownerId: string; source: Dataset; manifest: UploadManifest; createdAt: string; batchId?: string; batchIndex?: number }
 export interface UploadPart { importId: string; part: number; payload_text: string }
 export interface UploadPacketPart { part: number; payload: RxFact[] }
 export interface UploadProgress { phase: "preparing" | "uploading" | "verifying" | "paused" | "failed" | "complete"; saved: number; total: number; percent: number; message?: string }
@@ -27,20 +27,22 @@ const hashUploadFacts = async (facts: RxFact[]) => {
 };
 export const hashUploadText = async (text: string) => hashUploadFacts(JSON.parse(text));
 
-export async function saveUploadJob(job: UploadJob) {
+export async function saveUploadJobs(jobs: UploadJob[]) {
   const db = await uploadDb();
   try {
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction("jobs", "readwrite"); tx.objectStore("jobs").put(job);
+      const tx = db.transaction("jobs", "readwrite");
+      for (const job of jobs) tx.objectStore("jobs").put(job);
       tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
     });
   } finally { db.close(); }
 }
+export async function saveUploadJob(job: UploadJob) { await saveUploadJobs([job]); }
 export async function loadUploadJobs(ownerId: string): Promise<UploadJob[]> {
   const db = await uploadDb();
   try { return await new Promise((resolve, reject) => {
     const request = db.transaction("jobs").objectStore("jobs").getAll();
-    request.onsuccess = () => resolve(request.result.filter((j: UploadJob) => j.ownerId === ownerId).sort((a: UploadJob, b: UploadJob) => b.createdAt.localeCompare(a.createdAt)));
+    request.onsuccess = () => resolve(request.result.filter((j: UploadJob) => j.ownerId === ownerId).sort((a: UploadJob, b: UploadJob) => a.batchId && a.batchId === b.batchId ? (a.batchIndex || 0) - (b.batchIndex || 0) : a.createdAt.localeCompare(b.createdAt)));
     request.onerror = () => reject(request.error);
   }); } finally { db.close(); }
 }

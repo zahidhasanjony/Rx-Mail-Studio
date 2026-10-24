@@ -1,4 +1,5 @@
 import { supabase, cloudCatalogue } from "./storage";
+import { coversSource } from "./import-flow";
 import type { Dataset } from "./types";
 import { reconcileBrandPairs } from "./catalogue";
 import { runUpload, UploadRequestError, type UploadJob, type UploadProgress, type UploadState } from "./upload";
@@ -34,8 +35,10 @@ export async function uploadCloudSource(job: UploadJob, signal: AbortSignal, onP
     finish: async (_job, signal) => {
       // Resolve current overlaps at activation time, since another source may
       // have finished while this upload was paused.
-      const rows = await client.from("rxm_datasets").select("id,from_date,to_date").eq("active", true).lte("from_date", job.source.to).gte("to_date", job.source.from).abortSignal(signal);
+      const rows = await client.from("rxm_datasets").select("id,from_date,to_date,payload").eq("active", true).lte("from_date", job.source.to).gte("to_date", job.source.from).abortSignal(signal);
       if (rows.error) throw new UploadRequestError(rows.error.message, rows.status);
+      const partial = (rows.data || []).find(d => d.id !== job.source.id && !coversSource(job.source, d.payload || { ...job.source, from: d.from_date, to: d.to_date, dates: undefined }));
+      if (partial) throw new Error("A saved source now contains dates or markets outside this file. Cancel this upload and review the complete replacement.");
       await rpc("rxm_finish_import", { dataset: job.source.id, replace_ids: (rows.data || []).filter(d => d.id !== job.source.id).map(d => d.id) }, signal);
     },
   }, signal, onProgress);

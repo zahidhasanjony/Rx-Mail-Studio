@@ -7,3 +7,5 @@ Run `npm run build` and `npm test` after changes. Database tests use a local Pos
 Private source-file reconciliation results and account details are intentionally excluded from this public repository. `scripts/verify-mrw.ts` can check a source spreadsheet locally without committing the source or its results.
 
 Desktop/mobile browser review and a Windows/Classic Outlook acceptance test remain required. The companion is not installed by deploying the website. Email is opened for manual review and sending; a download never counts as an opened or sent message.
+
+Batch import checks cover automatic versus ambiguous sheet selection, all-market retention, versioned duplicate hashes, cumulative and disjoint phases, overlapping revisions, and replacements that would lose dates or markets. The compiled cloud test selects two workbooks, confirms once, pauses with both ordered jobs persisted, resumes without resending acknowledged records, and verifies both activations and queue cleanup. These tests simulate cloud requests; they do not import real prescription data into production.

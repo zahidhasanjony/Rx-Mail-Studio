@@ -8,7 +8,7 @@ import { build } from "vite";
 import { JSDOM } from "jsdom";
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 import { stageFacts } from "../src/import-staging.ts";
-import { prepareUpload } from "../src/upload.ts";
+import { loadUploadJobs, prepareUpload } from "../src/upload.ts";
 
 test("compiled cloud upload scans once, stays usable, pauses and resumes without duplicating records", async () => {
   const output = await mkdtemp(join(tmpdir(), "rxm-import-ui-"));
@@ -22,7 +22,7 @@ test("compiled cloud upload scans once, stays usable, pauses and resumes without
     const w = dom.window, errors = [], actions = [], requests = [], sources = [], chunks = [];
     let releaseBatch;
     const holdBatch = new Promise(resolve => { releaseBatch = resolve; });
-    let savedManifest;
+    const savedManifests = new Map();
     const account = { id: "11111111-1111-4111-8111-111111111111", username: "ADMIN", name: "Test", role: "owner", active: true };
     const jwt = [Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url"), Buffer.from(JSON.stringify({ sub: account.id, email: "owner@example.com", exp: Math.floor(Date.now()/1000)+3600, role: "authenticated" })).toString("base64url"), Buffer.alloc(32, 1).toString("base64url")].join(".");
     w.localStorage.setItem("sb-rx-project-auth-token", JSON.stringify({ access_token: jwt, refresh_token: "test-refresh", token_type: "bearer", expires_at: Math.floor(Date.now()/1000)+3600, expires_in: 3600, user: { id: account.id, email: "owner@example.com" } }));
@@ -44,9 +44,11 @@ test("compiled cloud upload scans once, stays usable, pauses and resumes without
               assert.equal(message.action, 'source-staged');
               assert.equal(message.generics, undefined, 'one source pass retains every market before review');
               const stagedImportId = crypto.randomUUID();
-              const facts = metadata.availableGenerics.map((generic, i) => ({ date: '2026-07-01', generic, brand: i === 0 ? 'NAPADOL' : 'COMPETITOR', company: 'Test', form: 'TAB', doctorCode: 'D' + i, doctorName: 'Test', specialty: 'Medicine', acdRegion: 'D5', acdMpe: 'D501', ccdRegion: 'D6', ccdMpe: 'D601', count: i + 1, sheet: "TRD JULY'26", sourceRow: i + 2 }));
+              const august = message.file.name === 'August.xlsx';
+              const from = august ? '2026-08-01' : '2026-07-01';
+              const facts = metadata.availableGenerics.map((generic, i) => ({ date: from, generic, brand: i === 0 ? 'NAPADOL' : 'COMPETITOR', company: 'Test', form: 'TAB', doctorCode: 'D' + i, doctorName: 'Test', specialty: 'Medicine', acdRegion: 'D5', acdMpe: 'D501', ccdRegion: 'D6', ccdMpe: 'D601', count: i + 1, sheet: "TRD JULY'26", sourceRow: i + 2 }));
               await stageFacts(stagedImportId, 0, facts);
-              result = { ...metadata, includedGenerics: metadata.availableGenerics, stagedImportId, stagedFactCount: facts.length };
+              result = { ...metadata, id: crypto.randomUUID(), name: message.file.name, hash: message.file.name, from, to: august ? "2026-08-31" : metadata.to, dates: [from], includedGenerics: metadata.availableGenerics, stagedImportId, stagedFactCount: facts.length };
             }
             this.onmessage({ data: { type: 'result', result } });
           } catch (error) { this.onmessage({ data: { type: 'error', message: error.message } }); }
@@ -60,12 +62,15 @@ test("compiled cloud upload scans once, stays usable, pauses and resumes without
       if (url.pathname === '/auth/v1/user') return response({ id: account.id, email: 'owner@example.com', aud: 'authenticated', role: 'authenticated' });
       if (url.pathname.endsWith('/rxm-auth')) return response({ account });
       if (url.pathname.endsWith('/rxm_members')) return response([{ email: 'owner@example.com', role: 'owner' }]);
-      if (url.pathname.endsWith('/rxm_datasets')) { if (options?.method === 'POST') { sources.push(body); return response([]); } return response(sources); }
+      if (url.pathname.endsWith('/rxm_datasets')) { if (options?.method === 'POST') { sources.push(body); return response([]); } return response(sources.filter(row => {
+        const start = url.searchParams.get('from_date')?.slice(4), end = url.searchParams.get('to_date')?.slice(4);
+        return (!start || row.payload.from <= start) && (!end || row.payload.to >= end) && (!url.searchParams.has('from_date') || row.active);
+      })); }
       if (url.pathname.endsWith('/rxm_fact_chunks')) { if (options?.method === 'POST') { chunks.push(body); return response([]); } return response(chunks); }
       if (url.pathname.endsWith('/rxm_begin_upload')) {
-        if (!sources.length) sources.push({ id: body.source.id, active: false, complete: false, payload: body.source });
-        savedManifest = body.manifest;
-        return response({ complete: sources[0].complete, uploaded: chunks.map(c => ({ part: c.upload_part, hash: savedManifest.parts[c.upload_part].hash })) });
+        if (!sources.some(s => s.id === body.source.id)) sources.push({ id: body.source.id, active: false, complete: false, payload: body.source });
+        savedManifests.set(body.source.id, body.manifest);
+        return response({ complete: sources.find(s => s.id === body.source.id).complete, uploaded: chunks.filter(c => c.dataset_id === body.source.id).map(c => ({ part: c.upload_part, hash: savedManifests.get(body.source.id).parts[c.upload_part].hash })) });
       }
       if (url.pathname.endsWith('/rxm_upload_batch')) {
         await holdBatch;
@@ -80,15 +85,14 @@ test("compiled cloud upload scans once, stays usable, pauses and resumes without
     w.eval(code.replaceAll('import.meta.url', '"https://rxmail.vercel.app/"'));
     await waitFor(() => w.document.querySelector('[aria-label="Cloud connected"]'));
     const file = w.document.querySelector('input[type="file"]');
-    Object.defineProperty(file, 'files', { configurable: true, value: [new w.File(['test'], 'July.xlsx')] });
+    Object.defineProperty(file, 'files', { configurable: true, value: [new w.File(['test'], 'July.xlsx'), new w.File(['test2'], 'August.xlsx')] });
     file.dispatchEvent(new w.Event('change', { bubbles: true }));
-    await waitFor(() => button('Process workbook'));
-    button('Process workbook').click();
-    await waitFor(() => button('Confirm import'));
-    assert.match(w.document.querySelector('.modal').textContent, /3 markets selected/);
-    assert.equal(w.document.querySelectorAll('.scope-list input:checked').length, 3);
-    assert.ok(!requests.some(r => r.method === 'POST' && r.path.endsWith('/rxm_datasets')), 'review does not upload anything');
-    button('Confirm import').click();
+    await waitFor(() => button('Import & Sync') && !button('Import & Sync').disabled);
+    assert.match(w.document.querySelector('.modal').textContent, /2 files to import/);
+    assert.equal(w.document.querySelectorAll('.scope-list input').length, 0);
+    assert.equal(w.document.querySelectorAll('.source-batch-row').length, 2);
+    assert.ok(!requests.some(r => r.path.endsWith('/rxm_begin_upload')), 'review does not upload anything');
+    button('Import & Sync').click();
     await waitFor(() => requests.some(r => r.path.endsWith('/rxm_upload_batch')));
     assert.ok(!w.document.querySelector('.busy-overlay'), 'upload does not block the app');
     button('Brand library').click();
@@ -97,14 +101,16 @@ test("compiled cloud upload scans once, stays usable, pauses and resumes without
     await waitFor(() => button('Resume upload'));
     assert.ok(!requests.some(r => r.path.endsWith('/rxm_finish_import')));
     assert.ok(w.document.body.textContent.includes('Upload paused'));
+    assert.deepEqual((await loadUploadJobs(account.id)).map(job => job.source.name), ['July.xlsx', 'August.xlsx'], 'reopening can recover the entire ordered batch');
     button('Resume upload').click();
-    await waitFor(() => w.document.body.textContent.includes('Import complete'));
-    assert.deepEqual(actions, ['inspect', 'source-staged', 'prepare-upload']);
-    assert.equal(requests.filter(r => r.path.endsWith('/rxm_upload_batch')).length, 1, 'resume skips every server-acknowledged part');
-    assert.equal(chunks.flatMap(c => c.payload).reduce((n, f) => n + f.count, 0), 6);
+    await waitFor(() => requests.filter(r => r.path.endsWith('/rxm_finish_import')).length === 2 && w.document.body.textContent.includes('Import complete'));
+    assert.deepEqual(actions, ['inspect', 'source-staged', 'inspect', 'source-staged', 'prepare-upload', 'prepare-upload']);
+    assert.equal(requests.filter(r => r.path.endsWith('/rxm_upload_batch')).length, 2, 'resume skips acknowledged parts and continues the next file');
+    assert.equal(chunks.flatMap(c => c.payload).reduce((n, f) => n + f.count, 0), 12);
     assert.equal(sources[0].payload.stagedImportId, undefined);
     assert.equal(sources[0].payload.facts, undefined);
     assert.deepEqual([...sources[0].payload.includedGenerics].sort(), [...metadata.availableGenerics].sort());
+    assert.equal((await loadUploadJobs(account.id)).length, 0, 'verified files leave no pending jobs');
     assert.deepEqual(errors, []);
   } finally { dom?.window.close(); await rm(output, { recursive: true, force: true }); }
 });
