@@ -6,3 +6,5 @@
 @media(max-width:580px){.user-create,.user-list{padding:18px}.user-create form{grid-template-columns:1fr}.users-table{min-width:480px}.user-list-heading h3{font-size:15px}.users-layout{gap:18px}}
 
 .admin-page-selection{margin-bottom:24px}.admin-page-selection h2{font-size:18px;margin:0 0 8px}.admin-page-selection p{color:var(--muted,#68746e);font-size:13px;line-height:1.6;margin:0 0 16px}
+
+.admin-management{margin-bottom:24px}.admin-management h2{font-size:18px;margin:0 0 16px}.admin-management-links{display:flex;gap:12px;flex-wrap:wrap}.admin-management-back{margin-bottom:16px}@media(max-width:580px){.admin-management-links{flex-direction:column}.admin-management-links button{justify-content:flex-start;min-height:48px}}

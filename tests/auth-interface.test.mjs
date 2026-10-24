@@ -110,6 +110,7 @@ test("compiled login restores the cloud indicator, preserves admin page access a
       const waitFor = async (check) => { for (let i=0;i<200;i++) { if (check()) return; await new Promise((r) => setTimeout(r, 15)); } assert.fail("Expected UI state: " + w.document.body.textContent.slice(-1500) + " errors: " + errors.join("; ")); };
       const button = (text) => [...w.document.querySelectorAll("button")].find((b) => b.textContent.trim() === text);
       const fill = (input, value) => { Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, "value").set.call(input, value); input.dispatchEvent(new w.Event("input", { bubbles: true })); };
+      const openManagement = async name => { button("Admin panel").click(); await waitFor(() => w.document.querySelector('.admin-management')); button(name).click(); await waitFor(() => w.document.querySelector('.page-heading h1').textContent.trim() === name); };
       try {
         w.eval(code.replaceAll("import.meta.url", '"https://rxmail.vercel.app/"'));
         await waitFor(() => w.document.querySelector('[aria-label="Username"]'));
@@ -150,6 +151,7 @@ test("compiled login restores the cloud indicator, preserves admin page access a
           assert.ok(!calls.some(c => c.action === "login"), "A saved verified session opens cloud mode without another password");
         }
         await waitFor(() => button("Sign out"));
+        for (const nav of w.document.querySelectorAll('.sidebar nav,.mobile-bottom')) for (const label of ["Source files","Region hierarchy","Brand library","Sources","Hierarchy"]) assert.ok(![...nav.querySelectorAll('button')].some(b => b.textContent.trim() === label));
         assert.ok(!requests.some(r => r.path.endsWith("/rxm_batches")), "Saved email HTML never blocks sign-in");
         historyAvailable = true;
         button("Batch history").click();
@@ -172,11 +174,10 @@ test("compiled login restores the cloud indicator, preserves admin page access a
         assert.equal(cloudDot.title, "Cloud connected");
         assert.equal(cloudDot.querySelectorAll('.status-dot').length, 1);
         if (role === "owner") {
-          button("Region hierarchy").click();
+          await openManagement("Region hierarchy");
           await waitFor(() => button("Create version"));
           assert.ok(!button("Create version").disabled);
-        }
-        button("Brand library").click();
+          await openManagement("Brand library");
         await waitFor(() => w.document.querySelector('.brand-card h2') && w.document.body.textContent.includes('TOFEN'));
         for (const brand of ["TOFEN","BILLI","MONOCAST","ATRIZIN","AXODIN","BEXIDAL","DUVENT","NASAL","CLOUD ONLY"])
           assert.ok([...w.document.querySelectorAll('.brand-card h2')].some(h => h.textContent === brand),brand+" survives partial cloud loading");
@@ -206,6 +207,7 @@ test("compiled login restores the cloud indicator, preserves admin page access a
           await waitFor(() => w.document.body.textContent.includes('No new Beximco pairs found'));
           assert.ok(![...w.document.querySelectorAll('.brand-card h2')].some(h=>h.textContent==='CLOUD ONLY'));
         }
+        }
         button("Settings").click();
         await waitFor(() => button("Save my defaults"));
         if (role === "owner") {
@@ -222,12 +224,13 @@ test("compiled login restores the cloud indicator, preserves admin page access a
           assert.ok(!button("Publish team default"));
           assert.ok(!w.document.querySelector('.settings-body .email-template-editor'));
         }
-        button("Region hierarchy").click();
+        if (role === "owner") {
+        await openManagement("Region hierarchy");
         await waitFor(() => button("Create version"));
         assert.equal(button("Create version").disabled, role !== "owner");
         assert.equal(button("Upload hierarchy").disabled, role !== "owner");
         assert.equal(!!button("Download full hierarchy"), role === "owner");
-        button("Source files").click();
+        await openManagement("Source files");
         await waitFor(() => w.document.querySelector(".source-row"));
         assert.equal(!!button("Delete"), role === "owner");
         if (role === "owner") {
@@ -239,6 +242,7 @@ test("compiled login restores the cloud indicator, preserves admin page access a
           button("Delete").click(); await waitFor(() => button("Delete source")); button("Delete source").click();
           await waitFor(() => !w.document.querySelector(".source-row"));
           assert.ok(requests.some(r => r.method === "DELETE" && r.path.endsWith("rxm_datasets")));
+        }
         }
         if (role === "owner") {
           await waitFor(() => button("Admin panel")); button("Admin panel").click();
@@ -270,6 +274,10 @@ test("compiled login restores the cloud indicator, preserves admin page access a
           assert.equal(calls.find((c) => c.action === "password").password, "replacement");
         } else {
           assert.ok(!button("Admin panel")); assert.ok(!button("Manage users"));
+          for (const label of ["Source files", "Region hierarchy", "Brand library", "Review hierarchy", "Set up hierarchy", "Upload Rx files"]) assert.ok(!button(label), label + " is admin only");
+          const file = w.document.querySelector('[aria-label="Upload Rx files"]');
+          assert.ok(file.disabled); Object.defineProperty(file,'files',{configurable:true,value:[new w.File(['x'],'denied.xlsx')]}); file.dispatchEvent(new w.Event('change',{bubbles:true}));
+          assert.ok(!w.document.querySelector('.modal'), "Non-admin upload input cannot start an import");
           assert.ok(!w.document.querySelector(".page-review"), "Stored enabled flag cannot expose selection to non-admin roles");
           assert.ok(!w.document.querySelector('[aria-label="Enable page selection"]'));
         }
@@ -282,8 +290,8 @@ test("compiled login restores the cloud indicator, preserves admin page access a
         assert.ok(!button("Admin controls")); assert.ok(!button("Admin panel"));
         await waitFor(() => w.document.querySelector('.login-device'));
         w.document.querySelector('.login-device').click();
-        await waitFor(() => button("Source files")); button("Source files").click();
-        await waitFor(() => w.document.body.textContent.includes("No source files yet"));
+        await waitFor(() => w.document.querySelector('[aria-label="On this device"]'));
+        assert.ok(!button("Source files")); assert.ok(!button("Region hierarchy")); assert.ok(!button("Brand library"));
         assert.ok(!w.document.querySelector(".source-row"), "Signing out does not leave cloud imports visible in the device workspace");
         assert.deepEqual(errors, []);
       } finally { w.close(); }

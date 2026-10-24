@@ -60,7 +60,7 @@ test("compiled cloud upload scans once, stays usable, pauses and resumes without
       const response = data => new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
       requests.push({ path: url.pathname, method: options?.method || 'GET', body });
       if (url.pathname === '/auth/v1/user') return response({ id: account.id, email: 'owner@example.com', aud: 'authenticated', role: 'authenticated' });
-      if (url.pathname.endsWith('/rxm-auth')) return response({ account });
+      if (url.pathname.endsWith('/rxm-auth')) return response(body.action === 'list' ? { accounts: [account] } : { account });
       if (url.pathname.endsWith('/rxm_members')) return response([{ email: 'owner@example.com', role: 'owner' }]);
       if (url.pathname.endsWith('/rxm_datasets')) { if (options?.method === 'POST') { sources.push(body); return response([]); } return response(sources.filter(row => {
         const start = url.searchParams.get('from_date')?.slice(4), end = url.searchParams.get('to_date')?.slice(4);
@@ -97,6 +97,8 @@ test("compiled cloud upload scans once, stays usable, pauses and resumes without
     button('Import & Sync').click();
     await waitFor(() => requests.some(r => r.path.endsWith('/rxm_upload_batch')));
     assert.ok(!w.document.querySelector('.busy-overlay'), 'upload does not block the app');
+    button('Admin panel').click();
+    await waitFor(() => button('Brand library'));
     button('Brand library').click();
     await waitFor(() => w.document.querySelector('.page-heading h1').textContent.trim() === 'Brand library');
     button('Pause upload').click(); releaseBatch();
