@@ -54,7 +54,12 @@ export default function DashboardPage({ datasets, mode, canEdit }: { datasets: D
   }, [mode, requestKey, from, to]);
   const metadata = useMemo(() => {
     const sources = eligibleDatasets(datasets, from, to), dates = coverage(sources, from, to);
-    return { dates, missing: reportingMonths(from, to).filter(m => !dates.some(d => d.startsWith(m))), limited: sources.some(s => s.includedGenerics && (!s.availableGenerics || s.includedGenerics.length < s.availableGenerics.length)) };
+    return { dates, missing: reportingMonths(from, to).filter(m => !dates.some(d => d.startsWith(m))), limited: sources.some(s => {
+      if (!s.includedGenerics) return false;
+      if (!s.availableGenerics) return true;
+      const included = new Set(s.includedGenerics.map(normalize));
+      return s.availableGenerics.some(g => !included.has(normalize(g)));
+    }) };
   }, [datasets, from, to]);
   const local = useMemo<{ rows: DashboardRow[]; error?: string }>(() => {
     if (mode === 'cloud') return { rows: [] as DashboardRow[] };
