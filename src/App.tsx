@@ -455,7 +455,7 @@ export default function App() {
     );
   const [workspace, setWorkspace] = useState<Workspace>(emptyWorkspace),
     [mode, setMode] = useState<Mode>("local"),
-    [page, setPage] = useState<Page>("generate");
+    [page, setPage] = useState<Page>(() => new URLSearchParams(window.location.search).get('view') === 'dashboard' ? 'dashboard' : 'generate');
   const [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(true),
     [progress, setProgress] = useState(0),
@@ -2640,7 +2640,7 @@ export default function App() {
                       ? "Sources"
                       : n.id === "hierarchy"
                         ? "Hierarchy"
-                        : "Settings"}
+                        : n.label}
                 </span>
               </button>
             ))}

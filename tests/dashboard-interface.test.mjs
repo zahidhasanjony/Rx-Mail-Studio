@@ -24,7 +24,9 @@ test('mobile dashboard switches between single month and range, opens TG brands 
   try {
     w.eval(code.replaceAll('import.meta.url','"https://rx-mail-studio.test/"'));
     await waitFor(()=>w.document.querySelectorAll('.queue-table tbody tr').length===6);
-    button('Dashboard').click();
+    const bottomButtons=[...w.document.querySelectorAll('.mobile-bottom button')];
+    assert.deepEqual(bottomButtons.map(b=>b.textContent.trim()),['Dashboard','Generate','Sources','Hierarchy','Settings']);
+    bottomButtons.find(b=>b.textContent.trim()==='Dashboard').click();
     await waitFor(()=>w.document.querySelector('.rx-dashboard'));
     assert.ok(w.document.querySelector('.app-shell').classList.contains('dashboard-active'));
     assert.ok(w.document.querySelector('.rx-period-bottom').textContent.includes("July'26 1st Flash"));
@@ -50,4 +52,24 @@ test('mobile dashboard switches between single month and range, opens TG brands 
     assert.equal(w.document.querySelector('.batch-download-choice select').value,'excel');
     assert.deepEqual(errors,[]);
   } finally { w.close(); }
+});
+
+test('direct dashboard link opens the separate dashboard while the normal URL still opens mail generation', async () => {
+  const html=await readFile(new URL('../dist/index.html',import.meta.url),'utf8');
+  const asset=html.match(/src="(\/assets\/index-[^"]+\.js)"/)[1];
+  const code=await readFile(new URL('../dist'+asset,import.meta.url),'utf8');
+  for(const suffix of ['/?view=dashboard','/']) {
+    const dom=new JSDOM('<div id="root"></div>',{url:'https://rx-mail-studio.test'+suffix,runScripts:'outside-only',pretendToBeVisual:true});
+    const w=dom.window,errors=[];
+    w.addEventListener('error',e=>errors.push(e.message));
+    Object.defineProperty(w,'crypto',{value:webcrypto});Object.defineProperty(w,'indexedDB',{value:new IDBFactory()});Object.defineProperty(w,'IDBKeyRange',{value:IDBKeyRange});Object.assign(w,{structuredClone,TextEncoder,TextDecoder,Blob});
+    try {
+      w.eval(code.replaceAll('import.meta.url','"https://rx-mail-studio.test/"'));
+      const selector=suffix.includes('dashboard')?'.rx-dashboard':'.batch-download-choice select';
+      for(let i=0;i<150&&!w.document.querySelector(selector);i++)await new Promise(r=>setTimeout(r,15));
+      assert.ok(w.document.querySelector(selector),suffix+' should open its requested page');
+      if(suffix==='/')assert.equal(w.document.querySelector(selector).value,'excel');
+      assert.deepEqual(errors,[]);
+    }finally{w.close();}
+  }
 });
