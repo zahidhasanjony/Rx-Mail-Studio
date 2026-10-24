@@ -92,5 +92,30 @@ test('Postgres preparation summaries, source mappings and manual assignments kee
     await db.query("update public.rxm_datasets set payload=jsonb_set(payload,'{preparationGroups}',(payload->'preparationGroups')-$1) where id=$2",[preparationKey('Ketotifen','OTHER ORAL','OTHER','SYP'),id]);
     await db.exec(`select set_config('request.jwt.claim.sub','${user}',false);select set_config('request.jwt.claim.email','owner@example.com',false);set role authenticated`);
     assert.equal((await call()).find(r=>r[2]==='OTHER ORAL')![0],'Unclassified','A brand-only reference cannot guess the TG of a missing preparation');
+    // Compare the optimized range RPC with the former implementation on repeated
+    // chunks, normalized aliases, explicit mapping conflicts and inactive data.
+    await db.exec('reset role');
+    const reference=(await readFile(new URL('../supabase/migrations/20261024101246_dashboard_preparation_classification_strict.sql',import.meta.url),'utf8'))
+      .replaceAll('public.rxm_dashboard_preparations(', 'public.rxm_dashboard_preparations_reference(');
+    await db.exec(reference);
+    for (const [month,active] of [['07',true],['08',true],['09',false]] as const) {
+      const nextId=`44444444-4444-4444-8444-4444444444${month}`;
+      const mapping={...groups,[preparationKey('Ketotifen','TOFEN','BEXIMCO','SYP')]:''};
+      await db.query(`insert into public.rxm_datasets(id,name,hash,from_date,to_date,imported_at,complete,active,payload) values($1,$2,$2,$3::date,$4::date,now(),true,$5,$6::jsonb)`,
+        [nextId,'range-'+month,`2026-${month}-01`,`2026-${month}-${month==='09'?'30':'31'}`,active,JSON.stringify({preparationGroups:mapping})]);
+      for (const count of [11,17]) await db.query(`insert into public.rxm_fact_chunks(dataset_id,month,generic,payload) values($1,$2,$3,$4::jsonb)`,
+        [nextId,'2026-'+month,' Ketotifen  ',JSON.stringify([
+          {generic:' Ketotifen  ',brand:' tofen ',company:' beximco ',form:'syrup',count},
+          {generic:' Ketotifen  ',brand:' tofen ',company:' beximco ',form:'eye drops',count:3}
+        ])]);
+    }
+    await db.exec('set role authenticated');
+    for (const [from,to] of [['2026-03','2026-10'],['2026-07','2026-08'],['2026-08','2026-08'],['2026-09','2026-10']]) {
+      const optimized=(await db.query<{data:unknown[]}>(`select public.rxm_dashboard_preparations($1,$2) data`,[from,to])).rows[0].data;
+      const original=(await db.query<{data:unknown[]}>(`select public.rxm_dashboard_preparations_reference($1,$2) data`,[from,to])).rows[0].data;
+      assert.deepEqual(optimized.map(r=>JSON.stringify(r)).sort(),original.map(r=>JSON.stringify(r)).sort(),`Range ${from}–${to} matches original classifications and totals`);
+    }
+    await assert.rejects(db.query(`select public.rxm_dashboard_preparations($1,$2)`,['2026-10','2026-03']),/valid month range/);
+
   } finally {await db.close();}
 });
