@@ -27,7 +27,7 @@ test('mobile dashboard switches between single month and range, opens TG brands 
     const bottomButtons=[...w.document.querySelectorAll('.mobile-bottom button')];
     assert.deepEqual(bottomButtons.map(b=>b.textContent.trim()),['Dashboard','Generate','Sources','Hierarchy','Settings']);
     bottomButtons.find(b=>b.textContent.trim()==='Dashboard').click();
-    await waitFor(()=>w.document.querySelector('.rx-dashboard'));
+    await waitFor(()=>w.document.querySelectorAll('.rx-kpi>strong').length===4);
     assert.ok(w.document.querySelector('.app-shell').classList.contains('dashboard-active'));
     assert.ok(w.document.querySelector('.rx-period-bottom').textContent.includes("July'26 1st Flash"));
     const singleTotal=w.document.querySelectorAll('.rx-kpi>strong')[2].title;

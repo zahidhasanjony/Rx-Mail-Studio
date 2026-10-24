@@ -1571,7 +1571,7 @@ export default function App() {
               </Button>
             ) : null}
           </div>
-          {page === 'dashboard' && <DashboardPage key={mode + ':' + (account?.id || 'device')} datasets={workspace.datasets} mode={mode}/>}
+          {page === 'dashboard' && <DashboardPage key={mode + ':' + (account?.id || 'device')} datasets={workspace.datasets} mode={mode} canEdit={mode !== 'cloud' || account?.role === 'owner' || account?.role === 'editor'}/>}
           {page === "generate" && (
             <>
               <section className="filter-card">

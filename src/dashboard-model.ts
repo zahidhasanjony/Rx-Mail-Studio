@@ -7,6 +7,12 @@ export { dashboardTotals, dashboardGroups, dashboardBrands } from './components/
 export type { DashboardRow } from './components/generated/DashboardData';
 export interface DashboardData { rows: DashboardRow[]; dates: string[]; missingMonths: string[]; limited: boolean }
 export const therapeuticGroupKey = (generic: string, brand: string, company: string) => [generic, brand, company].map(normalize).join('\u001f');
+export function mappedDashboardRows(rows: DashboardRow[], mappings: Record<string, string>): DashboardRow[] {
+  return rows.map(row => {
+    const tg = mappings[therapeuticGroupKey(row.generic, row.brand, row.company)];
+    return tg ? { ...row, tg } : row;
+  });
+}
 export function dashboardData(datasets: Dataset[], from: string, to: string): DashboardData {
   const sources = eligibleDatasets(datasets, from, to), rows = new Map<string, DashboardRow>();
   for (const [i, a] of sources.entries()) for (const b of sources.slice(i + 1)) {

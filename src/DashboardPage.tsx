@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Dataset } from './types';
 import type { Mode } from './storage';
-import { cloudDashboard } from './storage';
-import { coverage, eligibleDatasets } from './engine';
+import { cloudDashboard, cloudDashboardTGs, assignCloudDashboardTG, localDashboardTGs, assignLocalDashboardTG } from './storage';
+import { coverage, eligibleDatasets, normalize } from './engine';
+import { isBeximcoCompany } from './catalogue';
 import { reportingMonths, reportingPeriod } from './reporting';
-import { dashboardData, type DashboardRow } from './dashboard-model';
+import { dashboardData, mappedDashboardRows, therapeuticGroupKey, type DashboardRow } from './dashboard-model';
 import { RxDashboardView } from './components/generated/RxDashboardTGToBrand';
 
-export default function DashboardPage({ datasets, mode }: { datasets: Dataset[]; mode: Mode }) {
+export default function DashboardPage({ datasets, mode, canEdit }: { datasets: Dataset[]; mode: Mode; canEdit: boolean }) {
   const months = useMemo(() => [...new Set(datasets.filter(d => d.active).flatMap(d => reportingMonths(d.from.slice(0, 7), d.to.slice(0, 7))))].sort(), [datasets]);
   const latest = months.at(-1) || '';
   const [scope, setScope] = useState({ from: latest, to: latest, range: false }), [retry, setRetry] = useState(0);
@@ -16,6 +17,25 @@ export default function DashboardPage({ datasets, mode }: { datasets: Dataset[];
   const requestKey = `${sourceVersion}|${from}|${to}|${retry}`;
   const cache = useRef(new Map<string, DashboardRow[]>());
   const [remote, setRemote] = useState<{ key: string; rows: DashboardRow[]; error?: string }>({ key: '', rows: [] });
+  const [cloudTGs, setCloudTGs] = useState<string[]>([]), [tgOptionsError, setTGOptionsError] = useState('');
+  const [mappings, setMappings] = useState<Record<string, string>>({}), [mappingReady, setMappingReady] = useState(mode !== 'local'), [mappingError, setMappingError] = useState('');
+  const [savedNotice, setSavedNotice] = useState('');
+  useEffect(() => {
+    if (mode !== 'local') return;
+    let alive = true;
+    localDashboardTGs().then(saved => { if (alive) { setMappings(saved); setMappingReady(true); setMappingError(''); } })
+      .catch(e => { if (alive) { setMappingReady(true); setMappingError('Saved TG mappings could not load: ' + (e as Error).message); } });
+    return () => { alive = false; };
+  }, [mode, retry]);
+  useEffect(() => {
+    if (mode !== 'cloud' || !canEdit) return;
+    const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 20000);
+    let alive = true;
+    setTGOptionsError('');
+    cloudDashboardTGs(controller.signal).then(options => { if (alive) setCloudTGs(options); })
+      .catch(() => { if (alive) setTGOptionsError('TG choices could not load. Retry to get the complete list.'); }).finally(() => clearTimeout(timeout));
+    return () => { alive = false; clearTimeout(timeout); controller.abort(); };
+  }, [mode, canEdit, sourceVersion, retry]);
   useEffect(() => {
     if (mode !== 'cloud' || !from || !to) return;
     const saved = cache.current.get(requestKey);
@@ -37,17 +57,34 @@ export default function DashboardPage({ datasets, mode }: { datasets: Dataset[];
   }, [datasets, from, to]);
   const local = useMemo<{ rows: DashboardRow[]; error?: string }>(() => {
     if (mode === 'cloud') return { rows: [] as DashboardRow[] };
-    try { return dashboardData(datasets, from, to); } catch (e) { return { rows: [] as DashboardRow[], error: (e as Error).message }; }
-  }, [datasets, mode, from, to]);
+    try { const data = dashboardData(datasets, from, to); return { rows: mappedDashboardRows(data.rows, mappings) }; } catch (e) { return { rows: [] as DashboardRow[], error: (e as Error).message }; }
+  }, [datasets, mode, from, to, mappings]);
   const current = remote.key === requestKey, rows = mode === 'cloud' ? current ? remote.rows : [] : local.rows;
-  const error = mode === 'cloud' ? current ? remote.error : undefined : local.error;
+  const error = mode === 'cloud' ? current ? remote.error : undefined : mappingError || local.error;
+  const tgOptions = [...new Set([...cloudTGs, ...rows.map(r => r.tg), ...datasets.flatMap(d => Object.values(d.therapeuticGroups || {}))]
+    .map(normalize).filter(tg => tg && tg !== 'UNCLASSIFIED'))].sort();
+  async function assignTG(brand: string, generic: string, tg: string) {
+    if (!canEdit) throw new Error('TG editing requires Admin or Editor access.');
+    if (!tgOptions.includes(tg)) throw new Error('Select a TG from the list.');
+    const companies = [...new Set(rows.filter(r => normalize(r.brand) === normalize(brand) && normalize(r.generic) === normalize(generic) && isBeximcoCompany(r.company)).map(r => normalize(r.company)))];
+    if (!companies.length) throw new Error('This brand is no longer available. Refresh the dashboard.');
+    const keys = companies.map(company => therapeuticGroupKey(generic, brand, company));
+    if (mode === 'cloud') {
+      await assignCloudDashboardTG(generic, brand, companies, tg);
+      cache.current.clear(); setRetry(n => n + 1);
+    } else if (mode === 'local') setMappings(await assignLocalDashboardTG(keys, tg));
+    else setMappings(previous => ({ ...previous, ...Object.fromEntries(keys.map(key => [key, tg])) }));
+    setSavedNotice(`${brand} assigned to ${tg}.${mode === 'demo' ? ' This is a sample-only change.' : ''}`);
+  }
   const notices = [];
+  if (savedNotice) notices.push(savedNotice);
   if (metadata.missing.length) notices.push(`No active source for ${metadata.missing.map(m => reportingPeriod(m)).join(', ')}. Totals include the available months only.`);
   if (metadata.limited) notices.push('Some sources contain selected generics only. These shares cover the imported markets.');
   const unclassified = rows.filter(r => r.tg === 'Unclassified').reduce((n, r) => n + r.rx, 0);
   if (unclassified) notices.push(`${unclassified.toLocaleString()} Rx occurrences are unclassified. Their source TG is missing or ambiguous; they remain in the overall total.`);
   return <RxDashboardView embedded rows={rows} months={months} from={from} to={to} range={scope.range}
     sample={mode === 'demo'} periodLabel={from ? reportingPeriod(from, to, 'all', metadata.dates) : 'No active sources'}
-    loading={mode === 'cloud' && !!from && !current} error={error} notices={notices}
-    onRetry={() => setRetry(n => n + 1)} onPeriodChange={(from, to, range) => setScope({ from, to, range })}/>;
+    loading={mode === 'cloud' ? !!from && !current : !mappingReady} error={error} notices={notices}
+    tgOptions={tgOptions} tgOptionsError={tgOptionsError} onAssignTG={canEdit ? assignTG : undefined}
+    onRetry={() => setRetry(n => n + 1)} onPeriodChange={(from, to, range) => { setSavedNotice(''); setScope({ from, to, range }); }}/>;
 }

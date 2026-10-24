@@ -19,6 +19,17 @@ export async function cloudDashboard(from: string, to: string, signal: AbortSign
     return { tg, generic, brand, company, rx };
   });
 }
+export async function cloudDashboardTGs(signal: AbortSignal): Promise<string[]> {
+  if (!supabase) throw new Error('Cloud connection missing');
+  const result = await supabase.rpc('rxm_dashboard_tg_options').abortSignal(signal);
+  if (result.error) throw new Error(result.error.message);
+  return result.data as string[] || [];
+}
+export async function assignCloudDashboardTG(generic: string, brand: string, companies: string[], tg: string): Promise<void> {
+  if (!supabase) throw new Error('Cloud connection missing');
+  const result = await supabase.rpc('rxm_assign_dashboard_tg', { generic_name: generic, brand_name: brand, company_names: companies, target_tg: tg });
+  if (result.error) throw new Error(result.error.message);
+}
 export const cloudConfigured = Boolean(
   import.meta.env.VITE_SUPABASE_URL &&
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
@@ -37,6 +48,25 @@ async function db() {
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
   });
+}
+const mappingRecord = (value: unknown): Record<string, string> => value && typeof value === 'object' && !Array.isArray(value)
+  ? Object.fromEntries(Object.entries(value).filter(([, v]) => typeof v === 'string' && !!v)) : {};
+export async function localDashboardTGs(): Promise<Record<string, string>> {
+  const d = await db();
+  try { return await new Promise((resolve, reject) => {
+    const request = d.transaction('workspace').objectStore('workspace').get('dashboard-tgs');
+    request.onsuccess = () => resolve(mappingRecord(request.result)); request.onerror = () => reject(request.error);
+  }); } finally { d.close(); }
+}
+export async function assignLocalDashboardTG(keys: string[], tg: string): Promise<Record<string, string>> {
+  const d = await db();
+  try { return await new Promise((resolve, reject) => {
+    const tx = d.transaction('workspace', 'readwrite'), store = tx.objectStore('workspace');
+    const request = store.get('dashboard-tgs');
+    let saved: Record<string, string>;
+    request.onsuccess = () => { saved = { ...mappingRecord(request.result), ...Object.fromEntries(keys.map(key => [key, tg])) }; store.put(saved, 'dashboard-tgs'); };
+    tx.oncomplete = () => resolve(saved); tx.onerror = tx.onabort = () => reject(tx.error);
+  }); } finally { d.close(); }
 }
 export async function localLoad(): Promise<Workspace> {
   const d = await db();

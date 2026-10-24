@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Activity, ArrowLeft, ArrowRight, BarChart3, CalendarDays, ChevronDown, ChevronRight, CircleHelp, Database, Grid2X2, Layers3, LoaderCircle, Mail, Search, Target, X } from 'lucide-react';
 import { dashboardTotals, dashboardGroups, dashboardBrands } from './DashboardData';
 import type { DashboardRow } from './DashboardData';
+import { BrandTGAssignment } from './BrandTGAssignment';
 import './RxDashboardTGToBrand.css';
 export interface RxDashboardProps {
   rows: DashboardRow[];
@@ -18,6 +19,9 @@ export interface RxDashboardProps {
   onPeriodChange: (from: string, to: string, range: boolean) => void;
   onRetry?: () => void;
   onMail?: () => void;
+  tgOptions?: string[];
+  tgOptionsError?: string;
+  onAssignTG?: (brand: string, generic: string, tg: string) => Promise<void>;
 }
 const monthLabel = (month: string) => new Date(`${month}-01T00:00:00Z`).toLocaleDateString('en-GB', {
   month: 'long',
@@ -42,7 +46,10 @@ export function RxDashboardView({
   embedded,
   onPeriodChange,
   onRetry,
-  onMail
+  onMail,
+  tgOptions = [],
+  tgOptionsError,
+  onAssignTG
 }: RxDashboardProps) {
   const [tg, setTG] = useState(''),
     [search, setSearch] = useState(''),
@@ -92,7 +99,7 @@ export function RxDashboardView({
                 width: `${group.share || 0}%`
               }} /></div></button>)}<div className="rx-panel-foot"><span className="rx-live-dot" />Tap a TG to view its brands</div></section> : <section className="rx-performance"><div className="rx-panel-heading"><div><h2>Brand-wise performance</h2><span>Beximco brands · share of generic market</span></div><BarChart3 size={19} /></div><div className="rx-brand-controls"><label className="rx-search"><Search size={15} /><input placeholder="Search brand or generic" aria-label="Search dashboard brands" value={search} onChange={e => setSearch(e.target.value)} />{search && <button aria-label="Clear brand search" onClick={() => setSearch('')}><X size={14} /></button>}</label><div className="rx-sort" aria-label="Sort dashboard brands">{[['rx', 'Rx count'], ['share', 'Rx share'], ['name', 'A–Z']].map(([key, name]) => <button key={key} className={sort === key ? 'is-active' : ''} aria-pressed={sort === key} onClick={() => setSort(key)}>{name}</button>)}</div></div>{visibleBrands.length ? visibleBrands.map(brand => <article className="rx-brand-row" key={JSON.stringify([brand.generic, brand.name])}><div className="rx-row-main"><strong>{brand.name}</strong><div className="rx-brand-count">{number(brand.own)} <small>Rx</small></div></div><div className="rx-generic">{brand.generic}</div><div className="rx-brand-bottom"><div className="rx-meter"><i style={{
                   width: `${brand.share || 0}%`
-                }} /></div><strong>{percent(brand.share)}</strong></div><div className="rx-brand-market">Generic market: {number(brand.market)} Rx</div></article>) : <div className="rx-state"><h3>{search ? 'No matching brands' : 'No Beximco Rx in this TG'}</h3><p>{search ? 'Try another brand or generic name.' : 'The market total includes all companies.'}</p></div>}</section>}
+                }} /></div><strong>{percent(brand.share)}</strong></div><div className="rx-brand-market">Generic market: {number(brand.market)} Rx</div>{tg === 'Unclassified' && onAssignTG && <BrandTGAssignment brand={brand.name} generic={brand.generic} options={tgOptions} onSave={target => onAssignTG(brand.name, brand.generic, target)}/>}</article>) : <div className="rx-state"><h3>{search ? 'No matching brands' : 'No Beximco Rx in this TG'}</h3><p>{search ? 'Try another brand or generic name.' : 'The market total includes all companies.'}</p></div>}{tg === 'Unclassified' && (tgOptionsError ? <div className="rx-info" role="alert">{tgOptionsError}{onRetry && <button className="rx-action" onClick={onRetry}>Retry TG choices</button>}</div> : onAssignTG && !tgOptions.length ? <div className="rx-panel-foot">TG choices need source TG information. If still loading, try again shortly.</div> : !onAssignTG ? <div className="rx-panel-foot">TG assignment is available to Admins and Editors.</div> : null)}</section>}
         <footer className="rx-data-foot">Based on active MRW sources. Shares use Rx counts.</footer>
       </>}
     </div>

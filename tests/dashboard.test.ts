@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PGlite } from '@electric-sql/pglite';
 import { readFile, readdir } from 'node:fs/promises';
-import { dashboardData, dashboardGroups, dashboardBrands, dashboardTotals, therapeuticGroupKey } from '../src/dashboard-model';
+import { dashboardData, dashboardGroups, dashboardBrands, dashboardTotals, therapeuticGroupKey, mappedDashboardRows } from '../src/dashboard-model';
 import type { Dataset } from '../src/types';
 
 test('dashboard shares use summed occurrence counts, preserve all competitors and use each brand generic denominator', () => {
@@ -25,6 +25,11 @@ test('dashboard shares use summed occurrence counts, preserve all competitors an
   assert.equal(dashboardData([ds, { ...ds, id: 'inactive', active: false }], '2026-06', '2026-06').rows[0].rx, 7);
   assert.equal(dashboardData([{ ...ds, includedGenerics: ['Ketotifen'] }], '2026-06', '2026-06').limited, true, 'Legacy selected-market imports cannot claim full market coverage');
   assert.throws(() => dashboardData([ds, { ...ds, id: 'b' }], '2026-06', '2026-06'), /overlap/);
+  const mapped = mappedDashboardRows(rows, { [therapeuticGroupKey('Ketotifen', 'TOFEN', 'BEXIMCO')]: 'ANALGESIC' });
+  assert.equal(mapped[0].tg, 'ANALGESIC');
+  assert.deepEqual(dashboardTotals(mapped), dashboardTotals(rows));
+  assert.equal(mapped[1].tg, rows[1].tg, 'Another brand/company in the generic is unchanged');
+  assert.equal(rows[0].tg, 'ANTI-ALLERGY', 'Source classifications are not modified');
 });
 
 test('Postgres dashboard caches verified payload counts, protects summaries and respects roles, activation and scope', async () => {
@@ -48,6 +53,25 @@ test('Postgres dashboard caches verified payload counts, protects summaries and 
     assert.ok(rows.every(r => r[0] === 'ANTI-ALLERGY'));
     assert.ok(!JSON.stringify(rows).includes('private'));
     assert.equal((await call('2026-06','2026-06')).reduce((n,r)=>n+Number(r[4]),0),40);
+    await db.exec(`reset role;insert into public.rxm_dashboard_taxonomy(key,tg) values('test-analgesic','ANALGESIC');set role authenticated`);
+    const assign = async (tg: string) => db.query('select public.rxm_assign_dashboard_tg($1,$2,array[$3]::text[],$4)', [' ketotifen ', ' tofen ', ' Beximco ', tg]);
+    await assign(' analgesic ');
+    assert.equal((await call()).find(r => r[2] === 'TOFEN')![0], 'ANALGESIC', 'Manual TG overrides raw source TG across both months');
+    assert.equal((await call('2026-06','2026-06')).find(r => r[2] === 'TOFEN')![0], 'ANALGESIC');
+    assert.equal((await call()).reduce((n,r)=>n+Number(r[4]),0),90,'Assignment does not change Rx totals');
+    assert.equal((await call()).find(r=>r[2]==='OTHER')![0],'ANTI-ALLERGY','Only the named brand moves');
+    await assert.rejects(assign('NOT A REAL TG'),/Select a TG/);
+    await assert.rejects(db.exec(`insert into public.rxm_dashboard_tg_overrides(key,tg) values('G'||chr(31)||'B'||chr(31)||'C','MADE UP')`),/row-level security/);
+    await assert.rejects(db.query('select public.rxm_assign_dashboard_tg($1,$2,array[$3,$4]::text[],$5)', ['Ketotifen','TOFEN','FIRST COMPANY','','ANALGESIC']),/company selection/);
+    assert.equal((await db.query<{n:number}>('select count(*)::int n from public.rxm_dashboard_tg_overrides')).rows[0].n,1,'A failed multi-company save rolls back every change');
+    await db.exec(`reset role;insert into auth.users(id,email,email_confirmed_at) values('44444444-4444-4444-8444-444444444444','editor@example.com',now()),('55555555-5555-4555-8555-555555555555','member@example.com',now());insert into public.rxm_members(email,role) values('editor@example.com','editor'),('member@example.com','member');select set_config('request.jwt.claim.sub','44444444-4444-4444-8444-444444444444',false);select set_config('request.jwt.claim.email','editor@example.com',false);set role authenticated`);
+    await assign('ANTI-ALLERGY');
+    assert.equal((await db.query<{id:string}>('select updated_by::text id from public.rxm_dashboard_tg_overrides')).rows[0].id,'44444444-4444-4444-8444-444444444444');
+    await db.exec(`select set_config('request.jwt.claim.sub','55555555-5555-4555-8555-555555555555',false);select set_config('request.jwt.claim.email','member@example.com',false);`);
+    assert.equal((await call()).find(r=>r[2]==='TOFEN')![0],'ANTI-ALLERGY','Members see saved mappings');
+    await assert.rejects(assign('ANALGESIC'),/Admin or Editor/);
+    await assert.rejects(db.exec(`insert into public.rxm_dashboard_tg_overrides(key,tg) values('G'||chr(31)||'B'||chr(31)||'C','ANALGESIC')`),/row-level security/);
+    await db.exec(`select set_config('request.jwt.claim.sub','${user}',false);select set_config('request.jwt.claim.email','owner@example.com',false);`);
     await assert.rejects(db.exec(`update public.rxm_fact_chunks set dashboard_summary='[]'`), /permission denied/);
     await assert.rejects(db.exec(`insert into public.rxm_dashboard_taxonomy values('forged','TG')`), /permission denied/);
     await assert.rejects(call('2026-08', '2026-06'), /valid month/);
@@ -57,6 +81,8 @@ test('Postgres dashboard caches verified payload counts, protects summaries and 
     assert.equal((await call()).reduce((n,r)=>n+Number(r[4]),0),5,'payload replacement refreshes the cache');
     await db.exec('reset role;set role anon');
     await assert.rejects(call(),/permission denied/);
+    await assert.rejects(assign('ANALGESIC'),/permission denied/);
+    await assert.rejects(db.exec('select public.rxm_dashboard_tg_options()'),/permission denied/);
     await db.exec(`reset role;select set_config('request.jwt.claim.sub','',false);select set_config('request.jwt.claim.email','',false);set role authenticated`);
     await assert.rejects(call(),/access required/);
   } finally { await db.close(); }
