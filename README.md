@@ -144,3 +144,7 @@ Startup cloud requests have network timeouts and visible retry errors. Device ac
 ### Sign-in and saved batches
 
 Sign-in no longer reads `rxm_batches`. Batch history reads pages of 20 small summaries; full frozen email contents load only for the selected batch. `20261024151858_batch_history_summaries.sql` adds and backfills summaries, updates them on payload writes, and preserves the existing user isolation policies and original batch payloads. Apply this migration before publishing this client version. Outlook results can fetch an older batch directly, without first opening History.
+
+## Page change requests
+
+**Select changes** is available on the login page and every workspace page. In selection mode, taps select content instead of running app actions; sidebar and bottom navigation remain usable. Use **Select larger section** to target a container, choose Remove or Change, enter instructions, and add the item to the list. Turn selection off to use filters or drill into dashboard brands. **Review → Copy list for chat** exports the collected requests for implementation. Requests are stored only in this browser, can be individually removed, and do not alter the app, prescription data or generated emails. Input values and embedded email documents are excluded from captured section labels.
