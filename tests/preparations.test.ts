@@ -82,7 +82,7 @@ test('Postgres preparation summaries, source mappings and manual assignments kee
     assert.equal((await call()).reduce((n,r)=>n+Number(r[4]),0),106);
     await assert.rejects(db.exec(`select public.rxm_assign_preparation_tg('Ketotifen','TOFEN',array['BEXIMCO'],array['TAB'],'OPHTHALMIC')`),/Admin or Editor/);
     await db.exec('reset role;set role anon');await assert.rejects(call(),/permission denied/);
-    await db.exec('reset role');
+    await db.exec(`reset role;select set_config('request.jwt.claim.sub','${user}',false);select set_config('request.jwt.claim.email','owner@example.com',false);`);
     const sql=await db.query<{form:string,market:string}>("select rxm_private.preparation_form(' EYE DROPS ') form,rxm_private.preparation_market('DROP') market");
     assert.deepEqual(sql.rows[0],{form:'EYE DROP',market:'FORM:DROP'});
     await db.query('insert into public.rxm_dashboard_tg_overrides(key,tg) values($1,$2)',[therapeuticGroupKey('Ketotifen','OTHER EYE','OTHER'),'OPHTHALMIC']);

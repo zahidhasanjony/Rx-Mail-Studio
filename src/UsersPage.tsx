@@ -31,7 +31,7 @@ export default function UsersPage({ admin, notify, onAccountChange }: {
   };
   const roleSelect = (value: UserRole, change: (value: UserRole) => void, disabled = false) => (
     <label className="field"><span>Access role</span><select value={value} disabled={disabled} onChange={(e) => change(e.target.value as UserRole)}>
-      <option value="member">Member · generate emails</option><option value="editor">Editor · import and generate</option><option value="owner">Admin · manage all users</option>
+      <option value="member">Member · generate emails</option><option value="editor">Editor · dashboard and email reports</option><option value="owner">Admin · manage all users</option>
     </select></label>
   );
   return <div className="users-layout">

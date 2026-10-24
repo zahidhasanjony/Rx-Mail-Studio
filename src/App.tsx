@@ -118,6 +118,7 @@ import {
 
 type Page =
   "dashboard" | "generate" | "sources" | "hierarchy" | "brands" | "history" | "settings" | "users";
+const managementPages = ["sources", "hierarchy", "brands"] as const;
 const nav = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "generate", label: "Generate emails", icon: Mail },
@@ -534,7 +535,7 @@ export default function App() {
   const [emailTemplate, setEmailTemplate] = useState(() => emailTemplateFor(workspace.settings));
   useEffect(() => setEmailTemplate(emailTemplateFor(workspace.settings)), [workspace.settings.emailTemplate]);
   const wordingError = templateError(emailTemplate);
-  const isAdmin = mode === "cloud" && account?.role === "owner";
+  const isAdmin = mode === "cloud" && account?.role === "owner" && account.active;
   const [reviewPreference, setReviewPreference] = useState<{ ownerId: string; enabled: boolean } | null>(null);
   const reviewEnabled = !!(isAdmin && account?.active && reviewPreference?.ownerId === account.id && reviewPreference.enabled);
   useEffect(() => {
@@ -560,7 +561,7 @@ export default function App() {
     workspaceRef = useRef(workspace);
   const notify = (text: string, error = false) => setToast({ text, error });
   useEffect(() => {
-    if (mode !== "cloud" || !account || !["owner", "editor"].includes(account.role)) return;
+    if (!isAdmin || !account) return;
     let alive = true;
     setUploadJob(null); setUploadView(null);
     Promise.all([loadUploadJobs(account.id), pendingCloudImports()]).then(([jobs, pending]) => {
@@ -569,7 +570,7 @@ export default function App() {
       if (jobs[0]) { setUploadJob(jobs[0]); setUploadView({ phase: "paused", saved: 0, total: jobs[0].manifest.records, percent: -1, message: "Saved progress will be checked when you resume." }); }
     }).catch(e => { if (alive) notify((e as Error).message, true); });
     return () => { alive = false; uploadControl.current?.abort(); };
-  }, [mode, account?.id]);
+  }, [isAdmin, account?.id]);
   useEffect(() => {
     workspaceRef.current = workspace;
     setSettingsDraft(workspace.settings);
@@ -598,8 +599,10 @@ export default function App() {
     }
   }, [userEmail, mode]);
   useEffect(() => {
-    if (page === "users" && (mode !== "cloud" || account?.role !== "owner")) setPage("settings");
-  }, [page, mode, account?.role]);
+    if ((page === "users" || managementPages.some(id => id === page)) && !isAdmin) {
+      setPage("dashboard"); setBrandEdit(null); setHierarchyMap(null); setPendingHierarchy(null);
+    }
+  }, [page, isAdmin]);
   const profile = workspace.profiles.find(p => p.id === profileId) || workspace.profiles.find(p => brandPairKey(p) === brandPairKey(selectedBrand.current)) || workspace.profiles[0];
   useEffect(() => {
     if (profile) { selectedBrand.current = profile; if (profileId !== profile.id) setProfileId(profile.id); }
@@ -900,6 +903,7 @@ export default function App() {
     setHierarchyName(name.replace(/\.(xlsx|csv)$/i, ""));
   }
   async function resumeSourceUpload(job: UploadJob) {
+    if (!isAdmin) { notify("Admin access required", true); return; }
     if (uploadControl.current) return;
     const controller = new AbortController(); uploadControl.current = controller;
     let nextJob: UploadJob | undefined;
@@ -922,6 +926,7 @@ export default function App() {
     if (nextJob) void resumeSourceUpload(nextJob);
   }
   async function discardSourceUpload(id: string, localJob?: UploadJob) {
+    if (!isAdmin) { notify("Admin access required", true); return; }
     if (importRunning || !window.confirm("Discard this unfinished upload? Completed sources and saved emails will be kept.")) return;
     try {
       await discardCloudImport(id);
@@ -936,6 +941,7 @@ export default function App() {
     } catch (error) { notify((error as Error).message, true); }
   }
   async function commitSources(sources: Dataset[]) {
+    if (!isAdmin) throw new Error("Admin access required");
     if (!sources.length) return;
     const decisions = planSourceImports(sources, workspaceRef.current.datasets);
     const invalid = decisions.find(d => d.status !== "ready");
@@ -1252,7 +1258,7 @@ export default function App() {
         </a>
         <span className="workspace-label">SBM WORKSPACE</span>
         <nav>
-          {nav.filter((n) => n.id !== "users" || (mode === "cloud" && account?.role === "owner")).map((n) => (
+          {nav.filter((n) => !managementPages.some(id => id === n.id) && (n.id !== "users" || isAdmin)).map((n) => (
             <button
               key={n.id}
               className={page === n.id ? "active" : ""}
@@ -1316,7 +1322,7 @@ export default function App() {
           </div>
         </header>
         <main>
-          {mode === "cloud" && uploadView && (!uploadJob || uploadJob.ownerId === account?.id) && <UploadPanel
+          {isAdmin && uploadView && (!uploadJob || uploadJob.ownerId === account?.id) && <UploadPanel
             name={uploadJob?.source.name || "Source workbooks"}
             progress={uploadView}
             onPause={() => uploadControl.current?.abort()}
@@ -1354,6 +1360,7 @@ export default function App() {
               </button>
             </div>
           )}
+          {isAdmin && managementPages.some(id => id === page) && <button className="button text admin-management-back" onClick={() => setPage("users")}><ArrowRight size={16} style={{ transform: "rotate(180deg)" }}/>Back to Admin panel</button>}
           <div className="page-heading" hidden={page === 'dashboard'}>
             <div>
               <h1>
@@ -1371,7 +1378,7 @@ export default function App() {
                 }
               </h1>
             </div>
-            {page === "sources" ? (
+            {isAdmin && page === "sources" ? (
               <Button
                 onClick={() => sourceInput.current?.click()}
                 disabled={busy || sourceFlowBusy || importRunning || !!uploadJob}
@@ -1379,7 +1386,7 @@ export default function App() {
                 <Plus size={17} />
                 Upload Rx files
               </Button>
-            ) : page === "hierarchy" ? (
+            ) : isAdmin && page === "hierarchy" ? (
               <Button
                 onClick={() => hierarchyInput.current?.click()}
                 disabled={busy || !isAdmin}
@@ -1387,7 +1394,7 @@ export default function App() {
                 <UploadCloud size={17} />
                 Upload hierarchy
               </Button>
-            ) : page === "brands" ? (
+            ) : isAdmin && page === "brands" ? (
               <Button
                 onClick={() =>
                   setBrandEdit({
@@ -1567,10 +1574,10 @@ export default function App() {
                       need recipient or data checks. Select the ready regions to
                       continue.
                     </span>
-                    <button onClick={() => setPage("hierarchy")}>
+                    {isAdmin && <button onClick={() => setPage("hierarchy")}>
                       Review hierarchy
                       <ArrowRight size={14} />
-                    </button>
+                    </button>}
                   </div>
                 )}
                 {loading ? (
@@ -1701,8 +1708,8 @@ export default function App() {
                   <Empty
                     icon={Mail}
                     title="Your next batch starts here"
-                    text="Upload an MRW source file and your regional hierarchy. The queue will grow with your regions."
-                    action={
+                    text={isAdmin ? "Upload an MRW source file and your regional hierarchy. The queue will grow with your regions." : "Ask your admin to upload Rx data and set up the regional hierarchy."}
+                    action={isAdmin ?
                       <div className="empty-actions">
                         <Button onClick={() => sourceInput.current?.click()}>
                           <UploadCloud size={16} />
@@ -1714,7 +1721,7 @@ export default function App() {
                         >
                           Set up hierarchy
                         </Button>
-                      </div>
+                      </div> : undefined
                     }
                   />
                 )}
@@ -1748,7 +1755,7 @@ export default function App() {
               </div>
             </>
           )}
-          {page === "sources" && (
+          {isAdmin && page === "sources" && (
             <>
               <div className="source-upload">
               <section
@@ -1807,7 +1814,7 @@ export default function App() {
                           </span>
                           <Button
                             variant="text"
-                            disabled={busy || mode === "demo"}
+                            disabled={busy}
                             onClick={async () => {
                               if (
                                 !d.active &&
@@ -1848,7 +1855,7 @@ export default function App() {
               </section>
             </>
           )}
-          {page === "hierarchy" && (
+          {isAdmin && page === "hierarchy" && (
             <>
               <div className="hierarchy-summary">
                 <div className="card small-card">
@@ -2027,7 +2034,7 @@ export default function App() {
               )}
             </>
           )}
-          {page === "brands" && (
+          {isAdmin && page === "brands" && (
             <>
               <div className="card brand-library-toolbar">
                 <form onSubmit={e => { e.preventDefault(); setBrandSearch(brandSearchDraft); }} className="brand-library-search" role="search" aria-label="Brand Library search">
@@ -2312,9 +2319,10 @@ export default function App() {
                       : "Connect to cloud"}
                   </Button>
 
-                  <Button
+                  {account?.role === "owner" && account.active && <Button
                     variant="text"
                     onClick={async () => {
+                      if (account?.role !== "owner" || !account.active) return;
                       if (mode !== "local" || !workspace.datasets.length) {
                         notify(
                           "Open your device workspace with imported data first.",
@@ -2376,7 +2384,7 @@ export default function App() {
                     }}
                   >
                     Copy device workspace to cloud
-                  </Button>
+                  </Button>}
                   <Button variant="text" onClick={switchLocal}>
                     <Monitor size={15} />
                     Open device workspace
@@ -2386,6 +2394,10 @@ export default function App() {
             </div>
           )}
           {page === "users" && isAdmin && account?.active && <>
+            <section className="card admin-management" aria-label="Workspace management">
+              <h2>Workspace management</h2>
+              <div className="admin-management-links">{nav.filter(n => managementPages.some(id => id === n.id)).map(n => <button key={n.id} className="button secondary" onClick={() => setPage(n.id)}><n.icon size={20}/>{n.label}<ArrowRight size={16}/></button>)}</div>
+            </section>
             <section className="card admin-page-selection" data-review-ui aria-labelledby="page-selection-title">
               <h2 id="page-selection-title">Page selection</h2>
               <p id="page-selection-description">Show Select changes for your admin account on this device. Regular users never see it.</p>
@@ -2399,7 +2411,7 @@ export default function App() {
         <nav className="mobile-bottom">
           {nav
             .filter((n) =>
-              ["dashboard", "generate", "sources", "hierarchy", "settings"].includes(n.id),
+              ["dashboard", "generate", "settings"].includes(n.id) || (n.id === "users" && isAdmin),
             )
             .map((n) => (
               <button
@@ -2428,7 +2440,8 @@ export default function App() {
         accept=".xlsx"
         multiple
         aria-label="Upload Rx files"
-        onChange={(e) => { sourceFlow.current?.selectFiles(Array.from(e.target.files || [])); e.target.value = ""; }}
+        disabled={!isAdmin}
+        onChange={(e) => { if (isAdmin) sourceFlow.current?.selectFiles(Array.from(e.target.files || [])); e.target.value = ""; }}
       />
       <input
         hidden
@@ -2504,9 +2517,9 @@ export default function App() {
           </div>
         </Modal>
       )}
-      <SourceImportFlow control={sourceFlow} cloud={mode === "cloud"} demo={mode === "demo"}
+      {isAdmin && <SourceImportFlow control={sourceFlow} cloud demo={false}
         disabled={busy || loading || importRunning || !!uploadJob} datasets={workspace.datasets}
-        progress={progress} progressText={busyText} runWorker={runWorker} onCommit={commitSources} onBusy={setSourceFlowBusy} notify={notify} />
+        progress={progress} progressText={busyText} runWorker={runWorker} onCommit={commitSources} onBusy={setSourceFlowBusy} notify={notify} />}
       {deleteBrand && isAdmin && <Modal title="Delete brand pair?" onClose={() => !busy && setDeleteBrand(null)}>
         <div className="modal-body"><p>Delete <strong>{deleteBrand.brand} · {deleteBrand.generic}</strong> from the Brand Library?</p><p className="muted">Future imports will not add this pair again. Source data and saved email batches stay available.</p></div>
         <div className="modal-footer"><Button variant="secondary" disabled={busy} onClick={() => setDeleteBrand(null)}>Cancel</Button><Button variant="danger" disabled={busy} onClick={async () => {
@@ -2884,7 +2897,7 @@ export default function App() {
           </div>
         </Modal>
       )}
-      {brandEdit && (
+      {brandEdit && isAdmin && (
         <Modal
           title="Brand / generic market"
           onClose={() => setBrandEdit(null)}
