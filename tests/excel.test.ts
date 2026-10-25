@@ -83,6 +83,19 @@ test("streaming Excel import handles shared strings, XML entities and self-closi
   assert.deepEqual(d.facts[0].sourceRows, [2, 3]);
   assert.equal(d.catalog[0].brand, "TOFEN");
 });
+test('strength variants survive import without changing total product occurrences',async()=>{
+  const archive=unzipSync(new Uint8Array(await workbook().arrayBuffer()));
+  let sheet=strFromU8(archive['xl/worksheets/sheet1.xml']);
+  sheet=sheet.replace('</row>','<c r="M1" t="inlineStr"><is><t>Strength</t></is></c></row>');
+  sheet=sheet.replace('<c r="M2"/>','<c r="M2" t="inlineStr"><is><t>10 mg</t></is></c>');
+  sheet=sheet.replace('</row></sheetData>','<c r="M3" t="inlineStr"><is><t>20 mg</t></is></c></row></sheetData>');
+  archive['xl/worksheets/sheet1.xml']=xml(sheet);
+  const file=new File([zipSync(archive) as unknown as BlobPart],'strength.xlsx');
+  const data=await importRx(file,await inspectWorkbook(file));
+  assert.equal(data.facts.length,2);assert.equal(data.facts.reduce((s,f)=>s+f.count,0),2);
+  assert.deepEqual(data.facts.map(f=>f.strength).sort(),['10 MG','20 MG']);
+  assert.equal(data.analyticsVersion,1);assert.equal(data.catalog[0].variants?.length,2);
+});
 test("catalogue discovery includes Beximco pairs outside the retained Rx markets and excludes competitors", async () => {
   const archive = unzipSync(new Uint8Array(await workbook().arrayBuffer()));
   const row = (number: number, company: string, brand: string) => {

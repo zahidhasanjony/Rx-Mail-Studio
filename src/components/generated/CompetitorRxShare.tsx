@@ -6,7 +6,7 @@ const normalize = (value: string) => value.trim().replace(/\s+/g, ' ').toUpperCa
 const number = (value: number) => value.toLocaleString('en-GB');
 const percent = (value: number | null) => value === null ? '—' : `${value.toFixed(1)}%`;
 
-export function CompetitorRxShare({ rows, brand, generic, marketKey, forms }: { rows: DashboardRow[]; brand: string; generic: string; marketKey: string; forms: string[] }) {
+export function CompetitorRxShare({ rows, brand, generic, marketKey, forms, onBrand }: { rows: DashboardRow[]; brand: string; generic: string; marketKey: string; forms: string[]; onBrand?: () => void }) {
   const market = dashboardCompetitors(rows, generic, marketKey);
   const selected = market.brands.filter(row => row.beximco && normalize(row.name) === normalize(brand));
   const selectedForms = selected.length ? selected.flatMap(row => row.forms) : forms;
@@ -25,10 +25,10 @@ export function CompetitorRxShare({ rows, brand, generic, marketKey, forms }: { 
       {market.brands.length ? <ol className="rx-competitor-list">{market.brands.map((row, index) => {
         const highlighted = row.beximco && normalize(row.name) === normalize(brand);
         return <li className={`rx-competitor-row${highlighted ? ' rx-selected-brand' : ''}`} key={JSON.stringify([row.name, row.company])} aria-current={highlighted ? 'true' : undefined}>
-          <span className="rx-rank">{index + 1}</span><div className="rx-competitor-content">
+          <button className="rx-competitor-open" onClick={onBrand} aria-label={`View top prescribers of ${generic} from ${row.name}`}><span className="rx-rank">{index + 1}</span><div className="rx-competitor-content">
             <div className="rx-row-main"><div className="rx-market-brand"><strong>{row.name || 'Unnamed brand'}</strong> <span className="rx-company">({row.company || 'Company unavailable'})</span>{highlighted && <span className="rx-selected-tag">Selected brand</span>}</div><div className="rx-brand-count">{number(row.rx)} <small>Rx</small></div></div>
             <div className="rx-generic">{preparationLabel(row.forms)}</div><div className="rx-brand-bottom"><div className="rx-meter"><i style={{ width: `${row.share || 0}%` }}/></div><strong>{percent(row.share)}</strong></div>
-          </div>
+          </div></button>
         </li>;
       })}</ol> : <div className="rx-state"><h3>No Rx in this generic market</h3><p>Select another month or range to see the brand ranking.</p></div>}
       <div className="rx-panel-foot">Rx share = brand Rx ÷ {number(market.market)} generic market Rx</div>

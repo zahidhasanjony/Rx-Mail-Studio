@@ -1,0 +1,51 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {webcrypto} from 'node:crypto';
+import {JSDOM} from 'jsdom';
+import {IDBFactory,IDBKeyRange} from 'fake-indexeddb';
+import {demoWorkspace} from '../src/demo.ts';
+import {enterDevice} from './enter-workspace.mjs';
+
+test('native analysis filters, doctor drilldown, notes, productivity, FF, targeting and history work together',async()=>{
+  const indexedDB=new IDBFactory(),workspace=demoWorkspace();
+  for(const d of workspace.datasets)for(const f of d.facts)f.strength='1 MG';
+  const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('rx-mail-studio',1);r.onupgradeneeded=()=>r.result.createObjectStore('workspace');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+  await new Promise(resolve=>{const tx=db.transaction('workspace','readwrite');tx.objectStore('workspace').put(workspace,'main');tx.oncomplete=resolve;});db.close();
+  const html=await readFile(new URL('../dist/index.html',import.meta.url),'utf8'),asset=html.match(/src="(\/assets\/index-[^"]+\.js)"/)[1],code=await readFile(new URL('../dist'+asset,import.meta.url),'utf8');
+  const dom=new JSDOM('<div id="root"></div>',{url:'https://rx-mail-studio.test/?view=dashboard',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window,errors=[];
+  w.addEventListener('error',e=>errors.push(e.message));w.scrollTo=()=>{};
+  Object.defineProperty(w,'innerWidth',{value:390});Object.defineProperty(w,'crypto',{value:webcrypto});Object.defineProperty(w,'indexedDB',{value:indexedDB});Object.defineProperty(w,'IDBKeyRange',{value:IDBKeyRange});Object.assign(w,{structuredClone,TextEncoder,TextDecoder,Blob});
+  const wait=async check=>{for(let i=0;i<240;i++){if(check())return;await new Promise(r=>setTimeout(r,10));}assert.fail(w.document.body.textContent.slice(-2000)+' '+errors.join(';'));};
+  const button=text=>[...w.document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
+  const select=(label,value)=>{const el=w.document.querySelector(`[aria-label="${label}"]`);el.value=value;el.dispatchEvent(new w.Event('change',{bubbles:true}));};
+  try{
+    w.eval(code.replaceAll('import.meta.url','"https://rx-mail-studio.test/"'));await enterDevice(w);
+    await wait(()=>w.document.querySelector('.rx-tg-row'));
+    const touch=(type,x)=>{const event=new w.Event(type,{bubbles:true});Object.defineProperty(event,type==='touchstart'?'touches':'changedTouches',{value:[{clientX:x,clientY:150}]});w.document.dispatchEvent(event);};
+    touch('touchstart',5);touch('touchend',110);await wait(()=>w.document.querySelector('.sidebar.mobile-open'));
+    w.history.back();await wait(()=>!w.document.querySelector('.sidebar.mobile-open'));
+    assert.equal(w.document.querySelectorAll('[aria-label="ACD and CCD Rx shares"] .analysis-kpi').length,2);
+    select('Dosage form','SYP');select('Strength','1 MG');await wait(()=>w.document.querySelector('.rx-tg-row'));
+    w.document.querySelector('.rx-tg-row').click();await wait(()=>w.document.querySelector('.rx-brand-open'));
+    w.document.querySelector('.rx-brand-open').click();await wait(()=>w.document.querySelector('.rx-competitor-open'));
+    w.document.querySelector('.rx-competitor-open').click();await wait(()=>w.document.body.textContent.includes('Top 50 generic prescribers'));
+    assert.ok(w.document.querySelector('[aria-label="Prescriber brand"]'));
+    w.document.querySelector('.analysis-table tbody button').click();await wait(()=>w.document.body.textContent.includes('Preferred generics and brands'));
+    assert.ok(!w.document.body.textContent.includes('Degree'));assert.ok(!w.document.body.textContent.includes('Institute/chamber'));
+    const note=w.document.querySelector('textarea');Object.getOwnPropertyDescriptor(w.HTMLTextAreaElement.prototype,'value').set.call(note,'Visit next week');note.dispatchEvent(new w.Event('input',{bubbles:true}));
+    await wait(()=>Object.keys(w.localStorage).some(k=>k.endsWith(':notes')));
+    w.history.back();await wait(()=>w.document.body.textContent.includes('Top 50 generic prescribers'));
+    assert.equal(w.document.querySelector('[aria-label="Strength"]').value,'1 MG');
+    w.history.back();await wait(()=>w.document.querySelector('.rx-competitor-page'));
+    button('Specialty & productivity').click();await wait(()=>w.document.querySelector('.analysis-bars'));
+    assert.ok(w.document.body.textContent.includes('Generic Rx/doctor'));
+    button('Field force').click();await wait(()=>w.document.body.textContent.includes('Field Force Dashboard'));
+    assert.ok(w.document.querySelector('.analysis-table tbody tr'));
+    button('Doctor targeting').click();await wait(()=>w.document.body.textContent.includes('Doctors to target'));
+    assert.ok(w.document.querySelector('[aria-label="Dashboard month"]'));
+    const sidebar=[...w.document.querySelectorAll('.sidebar nav button')].find(b=>b.textContent.trim().startsWith('Generate emails'));sidebar.click();await wait(()=>w.document.querySelector('.queue-table'));
+    w.history.back();await wait(()=>w.document.body.textContent.includes('Doctors to target'));
+    assert.deepEqual(errors,[]);
+  }finally{w.close();}
+});

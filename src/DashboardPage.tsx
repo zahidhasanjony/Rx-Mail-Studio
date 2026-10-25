@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Dataset } from './types';
+import type { Dataset, BrandProfile, Hierarchy } from './types';
 import type { Mode } from './storage';
 import { cloudDashboard, cloudDashboardTGs, assignCloudDashboardTG, localDashboardTGs, assignLocalDashboardTG } from './storage';
 import { coverage, eligibleDatasets, normalize } from './engine';
@@ -8,11 +8,18 @@ import { reportingMonths, reportingPeriod } from './reporting';
 import { dashboardData, mappedDashboardRows, type DashboardRow } from './dashboard-model';
 import { RxDashboardView } from './components/generated/RxDashboardTGToBrand';
 import { preparationKey, normalizePreparation } from './preparations';
+import NativeAnalytics, { DivisionKpis, type AnalysisRoute } from './NativeAnalytics';
+import { analysisFacts, emptyAnalysisFilters, filterFacts, inMarket, summaryRows } from './analytics-model';
+import { loadAnalytics, clearAnalyticsCache } from './analytics-data';
+import { useNavigationState } from './navigation';
 
-export default function DashboardPage({ datasets, mode, canEdit }: { datasets: Dataset[]; mode: Mode; canEdit: boolean }) {
+export default function DashboardPage({ datasets, mode, canEdit, profiles = [], hierarchies = [], owner = 'device' }: { datasets: Dataset[]; mode: Mode; canEdit: boolean; profiles?: BrandProfile[]; hierarchies?: Hierarchy[]; owner?: string }) {
   const months = useMemo(() => [...new Set(datasets.filter(d => d.active).flatMap(d => reportingMonths(d.from.slice(0, 7), d.to.slice(0, 7))))].sort(), [datasets]);
+  const analyticsProfiles=useMemo(()=>profiles.map(p=>({...p,variants:[...(p.variants||[]),...datasets.flatMap(d=>d.catalog.filter(c=>normalize(c.brand)===normalize(p.brand)&&normalize(c.generic)===normalize(p.generic)).flatMap(c=>c.variants||[]))]})),[profiles,datasets]);
   const latest = months.at(-1) || '';
-  const [scope, setScope] = useState({ from: latest, to: latest, range: false }), [retry, setRetry] = useState(0);
+  const [scope, setScope] = useNavigationState('analysis-period:'+owner+':'+mode,{ from: latest, to: latest, range: false },false), [retry, setRetry] = useState(0);
+  const [filters, setFilters] = useNavigationState('analysis-filters:'+owner+':'+mode,emptyAnalysisFilters,false);
+  const [route, setRoute] = useNavigationState<AnalysisRoute>('analysis-route:'+owner+':'+mode,{page:'dashboard'});
   const from = scope.from || latest, to = scope.to || latest;
   const sourceVersion = datasets.map(d => [d.id, d.active, d.hash, d.from, d.to].join(':')).sort().join('|');
   const requestKey = `${sourceVersion}|${from}|${to}|${retry}`;
@@ -21,6 +28,15 @@ export default function DashboardPage({ datasets, mode, canEdit }: { datasets: D
   const [cloudTGs, setCloudTGs] = useState<string[]>([]), [tgOptionsError, setTGOptionsError] = useState('');
   const [mappings, setMappings] = useState<Record<string, string>>({}), [mappingReady, setMappingReady] = useState(mode !== 'local'), [mappingError, setMappingError] = useState('');
   const [savedNotice, setSavedNotice] = useState('');
+  const [details, setDetails] = useState<{key:string;datasets:Dataset[];error?:string}>({key:'',datasets:[]}), [detailProgress,setDetailProgress]=useState(0);
+  useEffect(() => {
+    if(mode!=='cloud'||!from||!to)return;
+    let alive=true;const controller=new AbortController();setDetailProgress(0);
+    loadAnalytics(datasets,from,to,controller.signal,n=>{if(alive)setDetailProgress(n);},owner)
+      .then(data=>{if(alive)setDetails({key:requestKey,datasets:data});})
+      .catch(e=>{if(alive)setDetails({key:requestKey,datasets:[],error:(e as Error).message});});
+    return()=>{alive=false;controller.abort();};
+  },[mode,requestKey,owner]);
   useEffect(() => {
     if (mode !== 'local') return;
     let alive = true;
@@ -86,9 +102,27 @@ export default function DashboardPage({ datasets, mode, canEdit }: { datasets: D
   if (savedNotice) notices.push(savedNotice);
   if (metadata.missing.length) notices.push(`No active source for ${metadata.missing.map(m => reportingPeriod(m)).join(', ')}. Totals include the available months only.`);
   if (metadata.limited) notices.push('Some sources contain selected generics only. These shares cover the imported markets.');
-  return <RxDashboardView embedded rows={rows} months={months} from={from} to={to} range={scope.range}
+  const detailReady=mode!=='cloud'||(details.key===requestKey&&!details.error&&current&&!remote.error);
+  const factResult=useMemo(()=>{
+    if(!detailReady)return {facts:[]};
+    try{return {facts:analysisFacts(mode==='cloud'?details.datasets:datasets,from,to,mappings,mode==='cloud'?rows:undefined)};}
+    catch(e){return {facts:[],error:(e as Error).message};}
+  },[detailReady,mode,details.datasets,datasets,from,to,mappings,rows]);
+  const facts=factResult.facts;
+  const selected=useMemo(()=>filterFacts(facts,filters),[facts,filters]);
+  const filteredRows=useMemo(()=>summaryRows(selected),[selected]);
+  const hasFilters=Object.values(filters).some(Boolean);
+  const periodChange=(from:string,to:string,range:boolean)=>{setSavedNotice('');setScope({from,to,range});};
+  const periodControls=<section className="rx-period" aria-label="Dashboard reporting period"><div className="rx-period-top"><span>Reporting period</span><div className="rx-segment"><button aria-pressed={!scope.range} className={!scope.range?'is-active':''} onClick={()=>periodChange(to,to,false)}>Month</button><button aria-pressed={scope.range} className={scope.range?'is-active':''} onClick={()=>periodChange(from,to,true)}>Range</button></div></div><div className={`rx-months ${scope.range?'rx-range':''}`}><label><span>{scope.range?'From':'Month'}</span><select aria-label={scope.range?'Dashboard from month':'Dashboard month'} value={from} onChange={e=>periodChange(e.target.value,scope.range&&to>=e.target.value?to:e.target.value,scope.range)}>{months.map(m=><option key={m} value={m}>{reportingPeriod(m)}</option>)}</select></label>{scope.range&&<label><span>To</span><select aria-label="Dashboard to month" value={to} onChange={e=>periodChange(e.target.value<from?e.target.value:from,e.target.value,true)}>{months.map(m=><option key={m} value={m}>{reportingPeriod(m)}</option>)}</select></label>}</div><div className="rx-period-bottom">{from?reportingPeriod(from,to,'all',metadata.dates):'No active sources'}</div></section>;
+  const dashboard=<RxDashboardView embedded hidePeriod rows={hasFilters?filteredRows:rows} months={months} from={from} to={to} range={scope.range}
     sample={mode === 'demo'} periodLabel={from ? reportingPeriod(from, to, 'all', metadata.dates) : 'No active sources'}
-    loading={mode === 'cloud' ? !!from && !current : !mappingReady} error={error} notices={notices}
+    loading={hasFilters?!detailReady:mode === 'cloud' ? !!from && !current : !mappingReady} error={error||factResult.error} notices={notices}
     tgOptions={tgOptions} tgOptionsError={tgOptionsError} onAssignTG={canEdit ? assignTG : undefined}
-    onRetry={() => setRetry(n => n + 1)} onPeriodChange={(from, to, range) => { setSavedNotice(''); setScope({ from, to, range }); }}/>;
+    onPrescribers={market=>setRoute({page:'prescribers',market})}
+    extraKpis={(tg,market)=><DivisionKpis ready={detailReady&&!factResult.error} facts={selected.filter(f=>market?inMarket(f,market):!tg||normalize(f.tg)===normalize(tg))}/>}
+    onRetry={() => setRetry(n => n + 1)} onPeriodChange={periodChange}/>;
+  return <NativeAnalytics facts={facts} ready={detailReady&&!factResult.error} loading={mode==='cloud'&&!!from&&details.key!==requestKey} error={factResult.error||(details.key===requestKey?details.error:undefined)} progress={detailProgress}
+    filters={filters} onFilters={setFilters} route={route} onRoute={setRoute} profiles={analyticsProfiles} hierarchies={hierarchies} storageKey={'rxm-analysis:'+mode+':'+owner}
+    periodLabel={from?reportingPeriod(from,to,'all',metadata.dates):'No active sources'} from={from} to={to} periodControls={periodControls} dashboard={dashboard} dates={metadata.dates}
+    onRetry={()=>{clearAnalyticsCache();setRetry(n=>n+1);}} onPresetPeriod={(from,to)=>periodChange(from,to,from!==to)}/>;
 }

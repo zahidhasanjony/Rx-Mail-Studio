@@ -98,6 +98,8 @@ import UsersPage from "./UsersPage";
 import AndroidMailQueue from "./AndroidMailQueue";
 import RegionReview from "./RegionReview";
 import DashboardPage from './DashboardPage';
+import { useNavigationState, useSidebarGesture, useModalHistory } from './navigation';
+import { clearAnalyticsCache } from './analytics-data';
 import EmailTemplateEditor from "./EmailTemplateEditor";
 import { emailTemplateFor, templateError } from "./email-template";
 import { download, outlookPackage, mailEml, emlFilename, emlPackage, emlPackageFilename, hierarchyCsv } from "./export";
@@ -177,9 +179,10 @@ function Modal({
   onClose: () => void;
   wide?: boolean;
 }) {
+  const closeModal=useModalHistory(onClose);
   const root = useRef<HTMLElement>(null),
     close = useRef(onClose);
-  close.current = onClose;
+  close.current = closeModal;
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement;
     const getFocusable = () => [
@@ -216,7 +219,7 @@ function Modal({
     };
   }, []);
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={closeModal}>
       <section
         ref={root}
         className={`modal ${wide ? "wide" : ""}`}
@@ -227,7 +230,7 @@ function Modal({
       >
         <header>
           <h2>{title}</h2>
-          <button className="icon-button" aria-label="Close" onClick={onClose}>
+          <button className="icon-button" aria-label="Close" onClick={closeModal}>
             <X size={20} />
           </button>
         </header>
@@ -465,8 +468,12 @@ export default function App() {
       storageValue("rxm-bridge-auto-v2") === "true",
     );
   const [workspace, setWorkspace] = useState<Workspace>(emptyWorkspace),
-    [mode, setMode] = useState<Mode>("local"),
-    [page, setPage] = useState<Page>(() => new URLSearchParams(window.location.search).get('view') === 'dashboard' ? 'dashboard' : 'generate');
+    [mode, setMode] = useState<Mode>("local");
+  const [appNavigation, navigateApp] = useNavigationState<{page:Page;sidebar:boolean}>('app-navigation', () => ({page:new URLSearchParams(window.location.search).get('view') === 'dashboard' ? 'dashboard' : 'generate',sidebar:false}));
+  const page=appNavigation.page, mobileNav=appNavigation.sidebar;
+  const setPage=(page:Page)=>navigateApp({page,sidebar:false},mobileNav);
+  const setMobileNav=(open:boolean)=>{if(!open&&mobileNav)history.back();else if(open&&!mobileNav)navigateApp({page,sidebar:true});};
+  useSidebarGesture(mobileNav,setMobileNav);
   const [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(false),
     [progress, setProgress] = useState(0),
@@ -493,8 +500,7 @@ export default function App() {
     [reviewRegion, setReviewRegion] = useState(""),
     [compactPreview, setCompactPreview] = useState(() => window.innerWidth <= 740),
     [search, setSearch] = useState(""),
-    [selected, setSelected] = useState<Set<string>>(new Set()),
-    [mobileNav, setMobileNav] = useState(false);
+    [selected, setSelected] = useState<Set<string>>(new Set());
   const [preview, setPreview] = useState<{
       html: string;
       title: string;
@@ -1166,6 +1172,7 @@ export default function App() {
     } finally { if (attempt === connectionAttempt.current) setBusy(false); }
   }
   async function signOutAccount() {
+    clearAnalyticsCache();
     connectionAttempt.current++; setBusy(true); setBusyText("Signing out");
     try {
       const result = await withDeadline(supabase!.auth.signOut({ scope: "local" }), "Sign-out took too long. Please retry.");
@@ -1264,7 +1271,6 @@ export default function App() {
               className={page === n.id ? "active" : ""}
               onClick={() => {
                 setPage(n.id);
-                setMobileNav(false);
               }}
             >
               <n.icon size={19} />
@@ -1419,7 +1425,7 @@ export default function App() {
               </Button>
             ) : null}
           </div>
-          {page === 'dashboard' && <DashboardPage key={mode + ':' + (account?.id || 'device')} datasets={workspace.datasets} mode={mode} canEdit={mode !== 'cloud' || account?.role === 'owner' || account?.role === 'editor'}/>}
+          {page === 'dashboard' && <DashboardPage key={mode + ':' + (account?.id || 'device')} datasets={workspace.datasets} profiles={workspace.profiles} hierarchies={workspace.hierarchies} owner={account?.id || 'device'} mode={mode} canEdit={mode !== 'cloud' || account?.role === 'owner' || account?.role === 'editor'}/>}
           {page === "generate" && (
             <>
               <section className="filter-card">
