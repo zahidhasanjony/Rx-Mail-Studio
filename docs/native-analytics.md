@@ -12,12 +12,31 @@ doctor follow-up notes are scoped to the current account and device. They do not
 alter source files and are not synchronized between devices.
 
 The current summary RPC still renders the initial overview. Detailed analytics
-load independently, in cursor-paginated batches of 12 source chunks, cancellable
-when changing the period or leaving the dashboard. Only complete detailed results
-are shown. One account/period/source-version cache avoids repeated downloads.
+load independently and are cancellable when changing the period or leaving the
+dashboard. A small cursor-paginated chunk manifest lets three batches of 12
+payloads download concurrently, including single-month selections. Only complete
+detailed results are shown; missing chunks or failed requests never become a
+cached partial result.
+
+Account/source-version/month caches reuse overlapping month ranges and persist
+complete monthly aggregates in IndexedDB. Cache keys include the signed-in user,
+source ID, hash, import timestamp and date bounds. New/replaced sources therefore
+load fresh data. TG classification continues to use the current summary response.
+Sign-out and Retry analysis clear memory and disk caches and invalidate in-flight
+loads. The cache is disposable: unavailable storage falls back to cloud loading.
+Memory and disk partition caches each retain at most 24 entries / 250,000 aggregate
+rows; disk entries expire after seven days. The last complete selection is also
+retained in memory, including selections too large for the partition cache.
 Monthly doctor/product aggregates omit source-row arrays and retain daily counts
 for equivalent-day comparisons. Large month ranges still require reading all
-selected cloud records; there is no server analytics index in this release.
+uncached cloud records; there is no server analytics index in this release.
+The first load, browser storage restore, classification and table rendering are
+not guaranteed to finish in milliseconds on a mobile device.
+
+`node --import tsx scripts/benchmark-analytics.ts` measures the loader with 43,118
+synthetic records. It reports first aggregation, repeat memory loads, simulated
+IndexedDB restore and request counts. It does not measure a live database,
+real browser storage, screen rendering or phone/network latency.
 
 ## Counts and denominators
 

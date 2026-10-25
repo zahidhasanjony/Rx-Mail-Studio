@@ -21,8 +21,8 @@ export default function DashboardPage({ datasets, mode, canEdit, profiles = [], 
   const [filters, setFilters] = useNavigationState('analysis-filters:'+owner+':'+mode,emptyAnalysisFilters,false);
   const [route, setRoute] = useNavigationState<AnalysisRoute>('analysis-route:'+owner+':'+mode,{page:'dashboard'});
   const from = scope.from || latest, to = scope.to || latest;
-  const sourceVersion = datasets.map(d => [d.id, d.active, d.hash, d.from, d.to].join(':')).sort().join('|');
-  const requestKey = `${sourceVersion}|${from}|${to}|${retry}`;
+  const sourceVersion = datasets.map(d => [d.id, d.active, d.hash, d.importedAt, d.from, d.to].join(':')).sort().join('|');
+  const requestKey = `${owner}|${sourceVersion}|${from}|${to}|${retry}`;
   const cache = useRef(new Map<string, DashboardRow[]>());
   const [remote, setRemote] = useState<{ key: string; rows: DashboardRow[]; error?: string }>({ key: '', rows: [] });
   const [cloudTGs, setCloudTGs] = useState<string[]>([]), [tgOptionsError, setTGOptionsError] = useState('');
