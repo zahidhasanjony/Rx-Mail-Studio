@@ -5,6 +5,10 @@ export interface RxFact {
   brand: string;
   company: string;
   form: string;
+  strength?: string;
+  prescriptionKey?: string;
+  // Transient monthly analytics aggregates retain daily counts for matched-day comparisons.
+  dailyCounts?: Record<string, number>;
   doctorCode: string;
   doctorName: string;
   specialty: string;
@@ -32,6 +36,7 @@ export interface Dataset {
   therapeuticGroups?: Record<string, string>;
   preparationGroups?: Record<string, string>;
   classificationVersion?: number;
+  analyticsVersion?: number;
   importedAt: string;
   active: boolean;
   rows: number;
@@ -52,6 +57,7 @@ export interface BrandProfile {
   generic: string;
   brand: string;
   forms: string[];
+  variants?: { form: string; strength: string }[];
   favorite?: boolean;
   aliases?: string[];
   targetGenerics?: string[];

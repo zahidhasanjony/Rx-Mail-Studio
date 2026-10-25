@@ -10,7 +10,8 @@ export function automaticSourceSheet(sheets: Sheet[]): Sheet | undefined {
 export async function fullMarketSource(dataset: Dataset): Promise<Dataset> {
   const scope = datasetGenericNames(dataset).sort();
   const sourceHash = dataset.sourceHash || dataset.hash;
-  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sourceHash + JSON.stringify([dataset.sheets, scope, dataset.classificationVersion || 1])));
+  const version = [dataset.sheets, scope, dataset.classificationVersion || 1, ...(dataset.analyticsVersion ? [dataset.analyticsVersion] : [])];
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sourceHash + JSON.stringify(version)));
   return { ...dataset, sourceHash, includedGenerics: scope, hash: Array.from(new Uint8Array(bytes)).map(n => n.toString(16).padStart(2, '0')).join('') };
 }
 const includesMarkets = (a: Dataset, b: Dataset) => {

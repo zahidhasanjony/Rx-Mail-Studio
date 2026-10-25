@@ -213,6 +213,10 @@ const keys = {
   company: ["COMPANY NAME"],
   tg: ["TG_L(ALL)", "TG_L (ALL)", "THERAPEUTIC GROUP", "TG"],
   form: ["DOSAGE DESCRIPTION"],
+  strength: ["STRENGTH"],
+  prescription: ["RX SL NO", "RX SL NO."],
+  sourceType: ["RX SOURCE TYPE"],
+  surveySpot: ["SURVEY SPOT"],
   doctorCode: ["DR CODE", "DOCTOR CODE"],
   doctorName: ["DR NAME/INSTITUTE NAME", "DOCTOR NAME"],
   specialty: ["DOC SPECIALTY", "SPECIALTY"],
@@ -299,6 +303,8 @@ export async function importRx(
           brand: normalize(get("brand")) || "UNBRANDED",
           company: get("company"),
           form: normalize(get("form")),
+          strength: normalize(get("strength")),
+          prescriptionKey: get("prescription") ? JSON.stringify([doctorCode, date, get("sourceType"), get("surveySpot"), get("prescription")]) : undefined,
           doctorCode,
           doctorName: get("doctorName") || doctorCode,
           specialty: get("specialty"),
@@ -348,6 +354,9 @@ export async function importRx(
             f.generic,
             f.brand,
             f.form,
+            f.strength,
+            f.company,
+            f.prescriptionKey,
             f.doctorCode,
             f.acdRegion,
             f.acdMpe,
@@ -373,6 +382,8 @@ export async function importRx(
             catalog.set(ck, p);
           }
           if (f.form && !p.forms.includes(f.form)) p.forms.push(f.form);
+          p.variants ??= [];
+          if (!p.variants.some(v => v.form === f.form && v.strength === f.strength)) p.variants.push({ form: f.form, strength: f.strength || '' });
         }
       });
       return [sheet.path, { parser, getHeader: () => headerFound }] as const;
@@ -422,6 +433,7 @@ export async function importRx(
     therapeuticGroups,
     preparationGroups,
     classificationVersion: 2,
+    analyticsVersion: 1,
     importedAt: new Date().toISOString(),
     active: true,
     rows,

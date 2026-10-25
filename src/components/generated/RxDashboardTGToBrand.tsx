@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useNavigationState } from '../../navigation';
+import type { Market } from '../../analytics-model';
 import { Activity, ArrowLeft, ArrowRight, BarChart3, CalendarDays, ChevronDown, ChevronRight, Database, Grid2X2, Layers3, LoaderCircle, Mail, Search, Target, X } from 'lucide-react';
 import { dashboardTotals, dashboardGroups, dashboardBrands } from './DashboardData';
 import type { DashboardRow } from './DashboardData';
@@ -24,6 +26,9 @@ export interface RxDashboardProps {
   tgOptions?: string[];
   tgOptionsError?: string;
   onAssignTG?: (brand: string, generic: string, forms: string[], tg: string) => Promise<void>;
+  hidePeriod?: boolean;
+  onPrescribers?: (market: Market) => void;
+  extraKpis?: (tg: string, market: Market | null) => ReactNode;
 }
 const monthLabel = (month: string) => new Date(`${month}-01T00:00:00Z`).toLocaleDateString('en-GB', {
   month: 'long',
@@ -51,13 +56,13 @@ export function RxDashboardView({
   onMail,
   tgOptions = [],
   tgOptionsError,
-  onAssignTG
+  onAssignTG, hidePeriod, onPrescribers, extraKpis
 }: RxDashboardProps) {
-  const [tg, setTG] = useState(''),
+  const [tg, setTG] = useNavigationState('dashboard-tg',''),
     [search, setSearch] = useState(''),
     [sort, setSort] = useState('rx'),
     [section, setSection] = useState('overview');
-  const [selectedBrand, setSelectedBrand] = useState<{ name: string; generic: string; marketKey: string; forms: string[] } | null>(null);
+  const [selectedBrand, setSelectedBrand] = useNavigationState<{ name: string; generic: string; marketKey: string; forms: string[] } | null>('dashboard-brand',null);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     heading.current?.focus({ preventScroll: true });
@@ -87,14 +92,15 @@ export function RxDashboardView({
     <div className="rx-content">
       {tg && <div className="rx-page-title"><h1 ref={heading} tabIndex={-1}>{selectedBrand ? 'Competitor Rx share' : 'Brand performance'}</h1></div>}
       {sample && <div className="rx-sample">Design preview · sample figures</div>}
-      {!tg && <section className="rx-period" aria-label="Dashboard reporting period"><div className="rx-period-top"><span><CalendarDays size={15} /> Reporting period</span><div className="rx-segment"><button className={!range ? 'is-active' : ''} aria-pressed={!range} onClick={() => onPeriodChange(to, to, false)}>Month</button><button className={range ? 'is-active' : ''} aria-pressed={range} onClick={() => onPeriodChange(from, to, true)}>Range</button></div></div>
+      {!hidePeriod && <section className="rx-period" aria-label="Dashboard reporting period"><div className="rx-period-top"><span><CalendarDays size={15} /> Reporting period</span><div className="rx-segment"><button className={!range ? 'is-active' : ''} aria-pressed={!range} onClick={() => onPeriodChange(to, to, false)}>Month</button><button className={range ? 'is-active' : ''} aria-pressed={range} onClick={() => onPeriodChange(from, to, true)}>Range</button></div></div>
         <div className={`rx-months ${range ? 'rx-range' : ''}`}><label><span>{range ? 'From' : 'Month'}</span><select aria-label={range ? 'Dashboard from month' : 'Dashboard month'} value={from} onChange={e => onPeriodChange(e.target.value, range && to >= e.target.value ? to : e.target.value, range)}>{months.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}</select><ChevronDown size={16} /></label>{range && <><ArrowRight className="rx-range-arrow" size={16} /><label><span>To</span><select aria-label="Dashboard to month" value={to} onChange={e => onPeriodChange(e.target.value < from ? e.target.value : from, e.target.value, true)}>{months.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}</select><ChevronDown size={16} /></label></>}</div>
         <div className="rx-period-bottom"><span className="rx-live-dot" />{periodLabel}<span className="rx-period-scope">Imported markets</span></div>
       </section>}
       {notices.map((notice, i) => <div className="rx-info" key={i}>{notice}</div>)}
-      {tg && <div className="rx-tg-selector"><button onClick={selectedBrand ? () => setSelectedBrand(null) : overview} aria-label={selectedBrand ? 'Back to TG brands' : 'Back to all therapeutic groups'}><ArrowLeft size={18} /></button><label><span>{selectedBrand ? 'BACK TO BRANDS · THERAPEUTIC GROUP' : 'THERAPEUTIC GROUP'}</span><select aria-label="Dashboard therapeutic group" value={tg} onChange={e => openTG(e.target.value)}>{!groups.some(g => g.name === tg) && <option value={tg}>{displayTG(tg)}</option>}{groups.map(g => <option key={g.name} value={g.name}>{displayTG(g.name)}</option>)}</select></label><ChevronDown size={18} /></div>}
+      {tg && <div className="rx-tg-selector"><button onClick={() => history.back()} aria-label={selectedBrand ? 'Back to TG brands' : 'Back to all therapeutic groups'}><ArrowLeft size={18} /></button><label><span>{selectedBrand ? 'BACK TO BRANDS · THERAPEUTIC GROUP' : 'THERAPEUTIC GROUP'}</span><select aria-label="Dashboard therapeutic group" value={tg} onChange={e => openTG(e.target.value)}>{!groups.some(g => g.name === tg) && <option value={tg}>{displayTG(tg)}</option>}{groups.map(g => <option key={g.name} value={g.name}>{displayTG(g.name)}</option>)}</select></label><ChevronDown size={18} /></div>}
       {loading ? <section className="rx-state" role="status"><LoaderCircle className="rx-spin" size={24} /><h2>Loading Rx summary</h2><p>You can continue using the app.</p></section> : error ? <section className="rx-state" role="alert"><h2>Summary unavailable</h2><p>{error}</p>{onRetry && <button className="rx-action" onClick={onRetry}>Try again</button>}</section> : !rows.length ? <section className="rx-state"><Database size={26} /><h2>No Rx data for this period</h2><p>Import or activate a source file to see your dashboard.</p></section> : <>
-        {selectedBrand ? <CompetitorRxShare rows={rows} brand={selectedBrand.name} generic={selectedBrand.generic} marketKey={selectedBrand.marketKey} forms={selectedBrand.forms}/> : <>
+        {extraKpis?.(tg, selectedBrand ? {brand:selectedBrand.name,generic:selectedBrand.generic,marketKey:selectedBrand.marketKey} : null)}
+        {selectedBrand ? <CompetitorRxShare rows={rows} brand={selectedBrand.name} generic={selectedBrand.generic} marketKey={selectedBrand.marketKey} forms={selectedBrand.forms} onBrand={onPrescribers ? () => onPrescribers({brand:selectedBrand.name,generic:selectedBrand.generic,marketKey:selectedBrand.marketKey}) : undefined}/> : <>
         <div className="rx-section-label"><span>{tg ? displayTG(tg) : 'Overall performance'}</span><span>{tg ? `${brandCount} Beximco brands` : `${groupCount} TGs`}</span></div>
         <section className="rx-kpis" aria-label="Overall Rx KPIs">
           <article className="rx-kpi rx-kpi-share"><div className="rx-kpi-top"><span className="rx-icon blue"><Target size={18} /></span><span className="rx-kpi-tag">Beximco</span></div><span className="rx-kpi-label">Rx share</span><strong>{percent(totals.share)}</strong><div className="rx-meter"><i style={{

@@ -47,14 +47,14 @@ test('mobile dashboard switches between single month and range, opens TG brands 
     assert.equal(w.document.querySelector('.rx-page-title h1').textContent,'Brand performance');
     assert.ok(w.document.querySelector('.rx-brand-row').textContent.includes('TOFEN'));
     assert.equal(w.document.querySelector('.rx-brand-row .rx-company').textContent,'(BEXIMCO)');
-    assert.ok(!w.document.querySelector('.rx-period'), 'Brand page inherits overview period');
+    assert.ok(w.document.querySelector('.rx-period'), 'Brand page offers the shared period controls');
     assert.ok(!w.document.querySelector('.rx-eyebrow'));
     assert.ok(!w.document.querySelector('[aria-label="Explain Rx share"]'));
     w.document.querySelector('[aria-label="View competitors for TOFEN (Ketotifen · Syrup)"]').click();
     await waitFor(()=>w.document.querySelectorAll('.rx-competitor-row').length===6);
     assert.equal(w.document.querySelector('.rx-page-title h1').textContent,'Competitor Rx share');
     assert.equal(w.document.activeElement,w.document.querySelector('.rx-page-title h1'),'Page navigation moves keyboard focus to the title');
-    assert.ok(!w.document.querySelector('.rx-period'), 'Competitor period controls removed');
+    assert.ok(w.document.querySelector('.rx-period'), 'Competitor page offers the shared period controls');
     assert.equal(w.document.querySelector('.rx-competitor-row strong').textContent,'FENAT','Ranking uses highest Rx share first');
     assert.equal(w.document.querySelectorAll('.rx-selected-brand').length,1);
     assert.equal(w.document.querySelector('.rx-selected-brand .rx-market-brand strong').textContent,'TOFEN');
@@ -66,7 +66,7 @@ test('mobile dashboard switches between single month and range, opens TG brands 
     w.document.querySelector('[aria-label="Back to TG brands"]').click();
     await waitFor(()=>w.document.querySelector('[aria-label="Back to all therapeutic groups"]'));
     w.document.querySelector('[aria-label="Back to all therapeutic groups"]').click();
-    await waitFor(()=>w.document.querySelector('.rx-period'));
+    await waitFor(()=>w.document.querySelector('.rx-tg-row'));
     assert.equal(w.document.querySelector('.rx-period-bottom').textContent,selectedPeriod,'Returning to overview preserves the selected range');
     button('Month').click();
     await waitFor(()=>w.document.querySelector('[aria-label="Dashboard month"]'));
